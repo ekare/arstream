@@ -7,6 +7,7 @@ env = SConscript("../thirdparty/godot-cpp/SConstruct", {"api_version": "4.6"})
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
 sources += Glob("src/sink/*.cpp")
+sources += Glob("src/net/*.cpp")
 
 # Platforma-ozel kaynaklar yalnizca ilgili platform hedeflenirken derlemeye dahil edilir.
 if env["platform"] == "android":

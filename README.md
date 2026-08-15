@@ -20,7 +20,7 @@ ARCore, tüm Android cihazlarda çalışmaz (Android 7.0+ VE Google'ın sertifik
 
 ## Durum
 
-M1 tamamlandı: `ArCapture` GDExtension'ı (C++) Android arm64 için derleniyor, Godot 4.6.1 export zinciriyle APK üretiliyor, Samsung Galaxy A30s'e kurulup GDScript↔native ping/pong round-trip'i doğrulandı. Gerçek kamera/IMU yakalama, encode ve ağ katmanı henüz yok (M2+). İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+M1–M4 tamamlandı: Camera2 → `AMediaCodec` H.264 (sıfır-kopya, Surface-girişli) → dosyaya kayıt, A30s'de gerçek çekimle doğrulandı (~30fps, geçerli Annex-B çıktı); kayıttan bağımsız açılıp kapanabilen önizleme; kablo protokolü v1'in C++ ve Python implementasyonları `fixtures/*.bin` golden-byte dosyalarına karşı test edildi. Henüz yok: gerçek TCP bağlantısı (`StreamSink`/sunucu tarafı kuk — M5), ARCore yolu (M6). İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Hızlı başlangıç
 
@@ -47,10 +47,21 @@ godot --headless --path mobile --export-debug "Android" ../build/arstream-debug.
 
 # cihaza kur
 adb install -r build/arstream-debug.apk
-
-# referans sunucu
-cd server && pip install -e . && arstream-server --host 0.0.0.0 --port 9999 --out ./captures
 ```
+
+`server/` referans alıcısı (asyncio sunucu, `arstream-server` CLI) henüz M5'te yazılacak; şu an yalnız `arstream_server.protocol` modülü (protokolün Python implementasyonu) var.
+
+## Test
+
+```bash
+# Python: protokol implementasyonu, fixtures/*.bin'e karsi
+cd server && pip install -e ".[dev]" && pytest tests/ -v
+
+# C++: ayni fixture'lara karsi, godot-cpp/cihaz gerekmez
+cd mobile/native/tests && scons && ./protocol_test
+```
+
+İki implementasyon `fixtures/*.bin`'e (bkz. `fixtures/generate_fixtures.py` — ikisinden de bağımsız, doğrudan spesifikasyondan üretilir) karşı test edilir; biri diğerinin referansı değildir.
 
 ## Lisans
 

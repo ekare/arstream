@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+# protocol_test icin bagimsiz host-derleme betigi -- godot-cpp'ye HIC girmez,
+# CI'da cihaz/emulator/Android SDK gerekmeden calisir (bkz. docs/ROADMAP.md M7).
+#
+# Calistir: cd mobile/native/tests && scons
+
+env = Environment()
+if env["PLATFORM"] == "win32":
+	env.Append(CXXFLAGS=["/std:c++17", "/EHsc"])
+else:
+	env.Append(CXXFLAGS=["-std=c++17"])
+
+env.Program("protocol_test", ["protocol_test.cpp", "../src/net/protocol.cpp"])

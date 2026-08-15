@@ -12,6 +12,14 @@ mobile/bin/
 **/*.o
 compile_commands.json
 
+# --- Host-native protokol testi (mobile/native/tests/) ---
+mobile/native/tests/.sconsign.dblite
+mobile/native/tests/protocol_test
+mobile/native/tests/protocol_test.exe
+mobile/native/tests/protocol_test.exp
+mobile/native/tests/protocol_test.lib
+mobile/native/tests/protocol_test.pdb
+
 # --- Android NDK / Gradle leftovers (yalnız araç zinciri; proje Kotlin/Gradle KULLANMIYOR) ---
 .gradle/
 local.properties

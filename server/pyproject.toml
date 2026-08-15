@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arstream-server"
+version = "0.1.0"
+description = "arstream kablo protokolunu (docs/PROTOCOL.md) konusan referans alici -- dogrulama + yasayan dokumantasyon, uretim ingestion servisi degil."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+video = ["av"]
+
+[project.scripts]
+arstream-server = "arstream_server.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arstream_server"]
