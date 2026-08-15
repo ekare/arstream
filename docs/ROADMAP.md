@@ -4,8 +4,8 @@
 
 | # | Aşama | Durum |
 |---|---|---|
-| M0 | Cihaz yetenek doğrulama spike'ı | Kısmen tamam — ADB pasif tanılama bitti (bkz. `DEVICE_COMPATIBILITY.md`), runtime `ArCoreApk_checkAvailability()` + sensör zaman damgası drift testi M1/M2'yi bekliyor |
-| M1 | GDExtension iskeleti (Android arm64) | Başlamadı |
+| M0 | Cihaz yetenek doğrulama spike'ı | Kod-gerektirmeyen kısım tamam (bkz. `DEVICE_COMPATIBILITY.md`); runtime `ArCoreApk_checkAvailability()` + sensör zaman damgası drift testi M6/M2'ye ertelendi (JNI bootstrap olmadan ARCore'un C API'si çağrılamıyor) |
+| M1 | GDExtension iskeleti (Android arm64) | **Tamamlandı** — SCons+godot-cpp+NDK 29 ile derlendi, Godot 4.6.1 export toolchain'i (export template + JDK + debug keystore) kuruldu, A30s'e APK kurulup ping/pong round-trip doğrulandı |
 | M2 | Camera2 geri-düşüş + IMU yakalama | Başlamadı |
 | M3 | AMediaCodec H.264 encode (yerel dosya) | Başlamadı |
 | M4 | Protokol v1 (C++ + Python paralel) | Başlamadı — spesifikasyon hazır (`PROTOCOL.md`) |

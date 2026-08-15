@@ -5,8 +5,8 @@ mobile/export_presets.cfg
 
 # --- GDExtension / SCons / C++ build ---
 mobile/native/.sconsign.dblite
-mobile/native/bin/
 mobile/native/build/
+mobile/bin/
 **/*.os
 **/*.obj
 **/*.o

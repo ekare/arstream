@@ -20,18 +20,33 @@ ARCore, tüm Android cihazlarda çalışmaz (Android 7.0+ VE Google'ın sertifik
 
 ## Durum
 
-Erken geliştirme aşaması — mimari kilitlendi, protokol spesifikasyonu v1.0 olarak yazıldı, ilk cihaz (Samsung Galaxy A30s) üzerinde ön-tanılama yapıldı. Kod tabanı henüz iskelet halinde. İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+M1 tamamlandı: `ArCapture` GDExtension'ı (C++) Android arm64 için derleniyor, Godot 4.6.1 export zinciriyle APK üretiliyor, Samsung Galaxy A30s'e kurulup GDScript↔native ping/pong round-trip'i doğrulandı. Gerçek kamera/IMU yakalama, encode ve ağ katmanı henüz yok (M2+). İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Hızlı başlangıç
 
-> Kod tabanı henüz M1 (GDExtension iskeleti) aşamasında değil — bu bölüm o aşama tamamlanınca gerçek build/run adımlarıyla doldurulacak.
+Gerekli araçlar (sürümler `mobile/native/SConstruct` ve bu depoda doğrulandı):
 
-Planlanan akış:
+- Godot 4.6.x editör (export şablonlarıyla birlikte)
+- Android NDK **29.0.14206865**, `$ANDROID_HOME/ndk/29.0.14206865` altında (veya `ANDROID_NDK_ROOT` ortam değişkeni)
+- Android SDK (build-tools + platform-tools), Godot Editor Settings'te `export/android/android_sdk_path`
+- JDK 21+ (apksigner için), Editor Settings'te `export/android/java_sdk_path`
+- Debug imzalama anahtarı — Editor Settings veya `mobile/export_presets.cfg`'deki `keystore/debug` yolunda bir PKCS12/JKS dosyası (`openssl req`+`openssl pkcs12 -export` ile üretilebilir, `keytool` şart değil)
+- SCons (`pip install scons`)
+
 ```bash
-# native (GDExtension) derleme
-cd mobile/native && scons platform=android arch=arm64 target=template_debug
+# native (GDExtension) derleme -- Android
+cd mobile/native
+ANDROID_NDK_ROOT=/path/to/ndk/29.0.14206865 scons platform=android arch=arm64 target=template_debug
 
-# Godot editöründe mobile/ projesini aç, Android export preset'iyle APK üret
+# editorun kendi platformunda da derlemek gerekir (aksi halde Godot projeyi acarken
+# GDExtension'i yukleyemez ve export'u engeller):
+scons platform=windows target=template_debug   # veya linux/macos, host'a gore
+
+# headless export (Godot editorunu hic acmadan)
+godot --headless --path mobile --export-debug "Android" ../build/arstream-debug.apk
+
+# cihaza kur
+adb install -r build/arstream-debug.apk
 
 # referans sunucu
 cd server && pip install -e . && arstream-server --host 0.0.0.0 --port 9999 --out ./captures
