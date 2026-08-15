@@ -1,0 +1,49 @@
+# --- Godot ---
+mobile/.godot/
+mobile/export_presets.cfg
+*.import
+
+# --- GDExtension / SCons / C++ build ---
+mobile/native/.sconsign.dblite
+mobile/native/bin/
+mobile/native/build/
+**/*.os
+**/*.obj
+**/*.o
+compile_commands.json
+
+# --- Android NDK / Gradle leftovers (yalnız araç zinciri; proje Kotlin/Gradle KULLANMIYOR) ---
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# --- iOS / Xcode (ileride) ---
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# --- godot-cpp submodule build artifacts ---
+mobile/thirdparty/godot-cpp/bin/
+mobile/thirdparty/godot-cpp/gen/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Yakalanan test verisi / çıktılar ---
+server/captures/
+*.log
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
