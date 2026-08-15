@@ -1,84 +1,84 @@
-# iOS/ARKit Handover Dokümanı
+# iOS/ARKit Handover Document
 
-Bu doküman, Mac (Mini veya başka) eline geçtiğinde iOS tarafına sıfırdan
-başlamak zorunda kalmamak için yazıldı. Android tarafında (`mobile/native/`)
-zaten inşa edilmiş, test edilmiş ve A30s'de doğrulanmış mimarinin iOS
-karşılığını nasıl kuracağını anlatıyor — kod yazmıyor (Mac olmadan
-derlenemez/test edilemez), ama TAM OLARAK ne yazılacağını, hangi dosyaların
-hazır olduğunu, hangi kısmın Android'den bile daha kolay olduğunu ve
-bilinmeyen/araştırılması gereken noktaları netleştiriyor.
+This document exists so that once a Mac (Mini or otherwise) is available,
+the iOS side doesn't have to start from scratch. It explains how to build
+the iOS counterpart of the architecture already built, tested, and verified
+on the A30s on the Android side (`mobile/native/`) — it doesn't write code
+(can't be compiled/tested without a Mac), but it pins down EXACTLY what
+needs to be written, which files are already ready, which part is even
+easier than Android, and the open questions that need investigating.
 
-**Önce oku:** [`ARCHITECTURE.md`](ARCHITECTURE.md) (özellikle "Mimari karar"
-ve "JNI bootstrap istisnası" bölümleri) ve [`PROTOCOL.md`](PROTOCOL.md).
-Aşağıdaki her şey bunların üzerine kurulu.
+**Read first:** [`ARCHITECTURE.md`](ARCHITECTURE.md) (especially the "Key
+decisions" and "JNI bootstrap exception" sections) and
+[`PROTOCOL.md`](PROTOCOL.md). Everything below builds on those.
 
 ---
 
-## 1. İyi haber: iOS, Android'den DAHA BASİT olacak
+## 1. The good news: iOS will be SIMPLER than Android
 
-Android'de en büyük sürtünme noktası şuydu: Godot'un GDExtension'ı Android'de
-`JNIEnv*`/`Activity` context'ine resmi bir yolla ulaşamıyor (bkz.
+Android's biggest friction point was this: Godot's GDExtension has no
+official way to reach the `JNIEnv*`/`Activity` context on Android (see
 [godot-proposals #6734](https://github.com/godotengine/godot-proposals/issues/6734)),
-bu yüzden ARCore'u başlatmak için minik bir Kotlin "bootstrap shim" gerekti.
+so a tiny Kotlin "bootstrap shim" was needed just to start ARCore.
 
-**iOS'ta bu sorun YOK.** Objective-C++ (`.mm`), C++'ın üst kümesi — ARKit,
-AVFoundation, CoreMotion sınıflarını (`ARSession`, `AVCaptureSession`,
-`CMMotionManager`) DOĞRUDAN, hiçbir köprü/context-aktarımı olmadan
-çağırabilirsiniz. Yani iOS tarafında **Swift'te hiçbir iş mantığı olmayacağı
-gibi, Android'deki gibi bile minik bir bootstrap dosyasına gerek yok** —
-sadece `.mm` uzantılı, saf C++ mantığının içine ARKit/AVFoundation çağrıları
-serpiştirilmiş dosyalar.
+**iOS doesn't have this problem.** Objective-C++ (`.mm`) is a superset of
+C++ — you can call ARKit, AVFoundation, CoreMotion classes (`ARSession`,
+`AVCaptureSession`, `CMMotionManager`) DIRECTLY, with no bridge/context
+handoff at all. So on iOS, not only will there be **no business logic in
+Swift, there won't even be a need for a tiny bootstrap file like Android's**
+— just `.mm` files where ARKit/AVFoundation calls are interleaved directly
+into otherwise plain C++ logic.
 
-Tek gerçek istisna, ARKit/AVFoundation/CoreMotion'ın C API'si olmaması —
-bu yüzden bu üç framework'e dokunan kod `.mm` olmak zorunda (Obj-C++), ama
-bu dosyaların içindeki mantık yine bizim kodumuz, üçüncü bir "plugin
-sistemi" değil.
+The one real exception is that ARKit/AVFoundation/CoreMotion have no C API
+— so any code touching these three frameworks must be `.mm` (Obj-C++), but
+the logic inside those files is still our own code, not some third-party
+"plugin system."
 
-**VideoToolbox (H.264 encoder) ise C API'dir** (`VTCompressionSession`,
-`<VideoToolbox/VideoToolbox.h>`) — Android'deki `AMediaCodec` ile birebir
-aynı durum. Yani `encode/h264_encoder_ios.cpp` **saf C++ olarak
-yazılabilir**, `.mm` olması bile gerekmez.
+**VideoToolbox (the H.264 encoder), on the other hand, IS a C API**
+(`VTCompressionSession`, `<VideoToolbox/VideoToolbox.h>`) — exactly the same
+situation as `AMediaCodec` on Android. So `encode/h264_encoder_ios.cpp` **can
+be written as plain C++**, it doesn't even need to be `.mm`.
 
 ---
 
-## 2. Değişmeden kullanılacak (zaten hazır, dokunmayın)
+## 2. Reusable as-is (already ready, don't touch)
 
-Bunların hiçbiri Android'e özgü değil — platform-bağımsız C++, olduğu gibi
-iOS'ta da derlenip çalışacak:
+None of these are Android-specific — platform-independent C++ that will
+build and run on iOS exactly as-is:
 
-| Dosya | Not |
+| File | Note |
 |---|---|
-| `net/protocol.h`, `net/protocol.cpp` | godot-cpp'ye bile bağımlı değil, tamamen taşınabilir. `mobile/native/tests/protocol_test.cpp` ile zaten test edildi. |
-| `sink/output_sink.h` | Arayüz, platform yok. |
-| `sink/file_sink.h/.cpp` | `fopen`/`fwrite` — POSIX, iOS'ta aynen çalışır. |
-| `sink/stream_sink.h/.cpp` | Bellek-önce/disk-taşma tampon mantığı, `std::thread`/`std::mutex` — hepsi taşınabilir. **Az önce küçük bir düzeltme yapıldı** (bkz. §6). |
-| `net/stream_client.h/.cpp` | POSIX BSD sockets (`socket`, `connect`, `send`, `getaddrinfo`) — Android ve iOS/Darwin'de birebir aynı API. **Az önce `IOS_ENABLED` icin de acildi** (bkz. §6). |
+| `net/protocol.h`, `net/protocol.cpp` | Doesn't even depend on godot-cpp, fully portable. Already tested via `mobile/native/tests/protocol_test.cpp`. |
+| `sink/output_sink.h` | Interface, no platform code. |
+| `sink/file_sink.h/.cpp` | `fopen`/`fwrite` — POSIX, works identically on iOS. |
+| `sink/stream_sink.h/.cpp` | Memory-first/disk-overflow buffer logic, `std::thread`/`std::mutex` — all portable. **Received a small fix recently** (see §6). |
+| `net/stream_client.h/.cpp` | POSIX BSD sockets (`socket`, `connect`, `send`, `getaddrinfo`) — identical API on Android and iOS/Darwin. **Recently opened up for `IOS_ENABLED` too** (see §6). |
 
-`ArCapture` (`ar_capture.h/.cpp`) da büyük ölçüde aynı kalır — yalnızca
-Android-özgü `#ifdef ANDROID_ENABLED` bloklarının yanına paralel bir
-`#ifdef IOS_ENABLED` bloğu eklenecek (bkz. §4).
+`ArCapture` (`ar_capture.h/.cpp`) also stays largely the same — an
+`#ifdef IOS_ENABLED` block just needs to be added parallel to the existing
+Android-specific `#ifdef ANDROID_ENABLED` blocks (see §4).
 
 ---
 
-## 3. Yeni yazılacak dosyalar (Android'deki karşılığıyla)
+## 3. New files to be written (with their Android counterpart)
 
-| iOS | Android karşılığı | Ne yapar |
+| iOS | Android counterpart | What it does |
 |---|---|---|
-| `capture/ios/arkit_capture_session.h/.mm` | `capture/android/camera2_capture_session.h/.cpp` | `ARSession` başlatır (`ARWorldTrackingConfiguration`), `ARSessionDelegate` ile kare+poz+point-cloud+intrinsics alır. |
-| `capture/ios/avf_capture_session.h/.mm` | Camera2CaptureSession'ın geri-düşüş rolü | ARKit yoksa/istenmiyorsa `AVCaptureSession` + `AVCaptureVideoDataOutput` ile ham yakalama. |
-| `capture/ios/imu_sampler_ios.h/.mm` | `ImuSampler` (Android'de ayrı dosya olarak hiç yazılmadı, NDK `ASensorManager` gerekirse eklenecekti) | `CMMotionManager` ile ham accelerometer/gyro. |
-| `encode/h264_encoder_ios.h/.cpp` | `encode/h264_encoder_android.h/.cpp` | `VTCompressionSession`, saf C API — `.mm` bile olmasına gerek yok. |
+| `capture/ios/arkit_capture_session.h/.mm` | `capture/android/camera2_capture_session.h/.cpp` | Starts an `ARSession` (`ARWorldTrackingConfiguration`), receives frame+pose+point-cloud+intrinsics via `ARSessionDelegate`. |
+| `capture/ios/avf_capture_session.h/.mm` | Camera2CaptureSession's fallback role | Raw capture via `AVCaptureSession` + `AVCaptureVideoDataOutput` when ARKit is unavailable/not wanted. |
+| `capture/ios/imu_sampler_ios.h/.mm` | `ImuSampler` (never written as a separate file on Android, would have been added if NDK `ASensorManager` were needed) | Raw accelerometer/gyro via `CMMotionManager`. |
+| `encode/h264_encoder_ios.h/.cpp` | `encode/h264_encoder_android.h/.cpp` | `VTCompressionSession`, a plain C API — doesn't even need to be `.mm`. |
 
-SConstruct'ta bu dosyalar için glob zaten hazır (M1'den beri orada,
-kullanılmadı):
+The glob for these files is already in place in SConstruct (there since M1,
+unused):
 ```python
 elif env["platform"] == "ios":
     sources += Glob("src/capture/ios/*.mm")
     sources += Glob("src/encode/*ios*.cpp")
 ```
 
-**Eksik olan tek şey**: iOS'ta çıktı `SharedLibrary` değil `StaticLibrary`
-olmalı (godot-cpp'nin kendi test projesindeki desen, bkz.
+**The one thing missing**: on iOS the output should be a `StaticLibrary`,
+not a `SharedLibrary` (the pattern used by godot-cpp's own test project, see
 `mobile/thirdparty/godot-cpp/test/SConstruct`):
 ```python
 elif env["platform"] == "ios":
@@ -87,16 +87,16 @@ elif env["platform"] == "ios":
     else:
         library = env.StaticLibrary("../bin/libarcapture.{}.{}.a".format(env["platform"], env["target"]), source=sources)
 else:
-    library = env.SharedLibrary(...)  # mevcut kod
+    library = env.SharedLibrary(...)  # existing code
 ```
-Bunu `mobile/native/SConstruct`'a eklemeden iOS derlemesi (muhtemelen)
-linker hatasıyla patlar.
+Without adding this to `mobile/native/SConstruct`, the iOS build will
+(likely) fail with a linker error.
 
 ---
 
-## 4. `ar_capture.h/.cpp`'de yapılacak değişiklik
+## 4. The change needed in `ar_capture.h/.cpp`
 
-Şu an:
+Currently:
 ```cpp
 #ifdef ANDROID_ENABLED
 #include "capture/android/camera2_capture_session.h"
@@ -104,7 +104,7 @@ linker hatasıyla patlar.
 ...
 #endif
 ```
-Yanına, aynı şablonla:
+Next to it, following the same pattern:
 ```cpp
 #elif defined(IOS_ENABLED)
 #include "capture/ios/arkit_capture_session.h"
@@ -112,116 +112,117 @@ Yanına, aynı şablonla:
 ...
 #endif
 ```
-`start_capture()`/`stop_capture()`/`on_preview_frame()` vb. içindeki gerçek
-mantık neredeyse birebir kopyalanabilir — sınıf isimleri değişir
-(`Camera2CaptureSession` → `ArkitCaptureSession`/`AvfCaptureSession`),
-akış aynı kalır: encoder önce başlar (surface/pixel-buffer-havuzu hazır
-olsun diye), sonra capture session başlar, `sensor_orientation_` sorgulanır
-(bkz. §5).
+The actual logic inside `start_capture()`/`stop_capture()`/
+`on_preview_frame()` etc. can be copied almost verbatim — class names change
+(`Camera2CaptureSession` → `ArkitCaptureSession`/`AvfCaptureSession`), the
+flow stays the same: the encoder starts first (so its surface/pixel-buffer
+pool is ready), then the capture session starts, `sensor_orientation_` is
+queried (see §5).
 
-`preview_width_`/`preview_height_`/`_update_preview_texture` tamamen
-platform-bağımsız (Image/ImageTexture, Godot'un kendi sınıfları) — hiç
-dokunulmaz.
-
----
-
-## 5. Bilinmeyen/araştırılması gereken noktalar (Mac'e geçince ilk iş)
-
-Bunlar Android'de karşılığı olup iOS'ta henüz doğrulanmamış şeyler —
-"M0" muadili bir doğrulama turu gerekiyor:
-
-1. **İzin isteme**: `OS.request_permission("android.permission.CAMERA")`
-   Android'e özgüydü. Godot'un `OS` sınıfının iOS'ta kamera izni için bir
-   karşılığı var mı (muhtemelen `OS.request_permission()` bir miktar
-   cross-platform ama iOS desteği doğrulanmadı), yoksa native tarafta
-   `AVCaptureDevice.requestAccess(for: .video)` mi çağırmak gerekecek —
-   araştırılmalı. `Info.plist`'e `NSCameraUsageDescription` şart (export
-   preset'te ayarlanır).
-
-2. **Rotasyon**: Android'de `ACAMERA_SENSOR_ORIENTATION` (bkz.
-   `camera2_capture_session.h`'deki `query_back_camera_sensor_orientation`)
-   ile çözüldü. iOS'ta muadili `AVCaptureConnection.videoRotationAngle`
-   (iOS 17+) veya eski `videoOrientation` API'si — hangisinin
-   kullanılacağı hedef minimum iOS sürümüne bağlı, araştırılmalı. Protokol
-   tarafında değişiklik gerekmez — `VIDEO_CONFIG`'in `rotation` alanı zaten
-   platform-bağımsız (bkz. `PROTOCOL.md` §3.3).
-
-3. **Zero-copy kare akışı**: Android'de `AMediaCodec_createInputSurface()`
-   ile kamera doğrudan encoder'ın Surface'ine yazıyordu (CPU kopyası yok).
-   iOS'ta `ARFrame.capturedImage`/`AVCaptureVideoDataOutput` bir
-   `CVPixelBuffer` verir; bunu `VTCompressionSessionEncodeFrame()`'e
-   doğrudan vermek mümkün ama gerçek sıfır-kopya için pixel buffer
-   havuzunun (`CVPixelBufferPool`) encoder'ın beklediği formatla eşleşmesi
-   gerekiyor — ilk denemede CPU kopyalı basit yol ile başlayıp
-   (`AMediaCodec` öncesi Android yaklaşımına benzer), sonra optimize etmek
-   makul bir sıra.
-
-4. **Minimum iOS sürümü**: Android'de API 26 gereksinimi derleme sırasında
-   ortaya çıktı (`AMediaCodec_createInputSurface` API 26+). iOS'ta ARKit
-   zaten iOS 11+ istiyor, VideoToolbox çok daha eski — muhtemelen sorun
-   olmaz ama derleme sırasında netleşecek.
-
-5. **Editör-içi yükleme**: M1'de Windows için ayrı bir derleme gerekmişti
-   (Godot editörü kendi platformunda uzantıyı yükleyemezse export'u
-   engelliyordu). Mac'te editör macOS native çalışacağı için bu sefer
-   `scons platform=macos target=template_debug` gerekecek (Android/iOS'a
-   ek olarak, ayrı bir üçüncü derleme) — `mobile/arcapture.gdextension`'a
-   `macos.debug`/`macos.release` girdilerini de eklemek gerekir.
+`preview_width_`/`preview_height_`/`_update_preview_texture` are entirely
+platform-independent (Image/ImageTexture, Godot's own classes) — no changes
+needed there at all.
 
 ---
 
-## 6. Bu oturumda şimdiden yapılan hazırlıklar
+## 5. Open questions / things to research (first thing once on a Mac)
 
-- **`stream_client.cpp`**: derleme koşulu `#ifdef ANDROID_ENABLED` →
-  `#if defined(ANDROID_ENABLED) || defined(IOS_ENABLED)` olarak genişletildi.
-  POSIX sockets kodu Android ve iOS'ta birebir aynı olduğu için bu güvenli,
-  mekanik bir düzeltmeydi (Mac gerektirmedi, Android derlemesiyle
-  doğrulandı) — StreamSink/StreamClient artık iOS'ta da gerçekten
-  çalışacak, ek kod gerekmeden.
-- Bu doküman (`docs/IOS_HANDOVER.md`).
+These have an Android counterpart but haven't been verified on iOS yet —
+an "M0"-equivalent verification pass is needed:
+
+1. **Requesting permission**: `OS.request_permission("android.permission.CAMERA")`
+   was Android-specific. Does Godot's `OS` class have an iOS equivalent for
+   camera permission (`OS.request_permission()` is probably somewhat
+   cross-platform but iOS support hasn't been verified), or will
+   `AVCaptureDevice.requestAccess(for: .video)` need to be called from the
+   native side — needs research. `NSCameraUsageDescription` is required in
+   `Info.plist` (set via the export preset).
+
+2. **Rotation**: solved on Android via `ACAMERA_SENSOR_ORIENTATION` (see
+   `query_back_camera_sensor_orientation` in `camera2_capture_session.h`).
+   The iOS equivalent is `AVCaptureConnection.videoRotationAngle` (iOS 17+)
+   or the older `videoOrientation` API — which one to use depends on the
+   target minimum iOS version, needs research. No protocol-side changes are
+   needed — `VIDEO_CONFIG`'s `rotation` field is already platform-independent
+   (see `PROTOCOL.md` §3.3).
+
+3. **Zero-copy frame flow**: on Android, `AMediaCodec_createInputSurface()`
+   let the camera write directly into the encoder's Surface (no CPU copy).
+   On iOS, `ARFrame.capturedImage`/`AVCaptureVideoDataOutput` hand you a
+   `CVPixelBuffer`; it's possible to pass this directly to
+   `VTCompressionSessionEncodeFrame()`, but true zero-copy requires the
+   pixel buffer pool (`CVPixelBufferPool`) to match the format the encoder
+   expects — a reasonable order is to start with a simple CPU-copy path
+   first (similar to the pre-`AMediaCodec` Android approach), then optimize.
+
+4. **Minimum iOS version**: on Android the API 26 requirement showed up
+   during the build (`AMediaCodec_createInputSurface` needs API 26+). On
+   iOS, ARKit already requires iOS 11+, and VideoToolbox is much older —
+   probably not an issue, but will become clear during the build.
+
+5. **In-editor loading**: in M1, a separate build was needed for Windows
+   (the Godot editor blocked export if it couldn't load the extension on
+   its own platform). Since the editor will run natively on macOS this
+   time, `scons platform=macos target=template_debug` will be needed (in
+   addition to Android/iOS, a separate third build) — the
+   `macos.debug`/`macos.release` entries also need to be added to
+   `mobile/arcapture.gdextension`.
 
 ---
 
-## 7. Araç zinciri (Mac'te kurulacaklar)
+## 6. Prep work already done in this session
 
-- Xcode (en güncel stabil sürüm) — App Store'dan.
-- Godot 4.6.x editör (macOS `.dmg`/`.zip`) — export template paketi
-  (`Godot_v4.6.1-stable_export_templates.tpz`, zaten indirilmiş
-  Windows'takiyle **aynı dosya**, platform-bağımsız) iOS ve macOS
-  template'lerini de içeriyor, ayrıca indirmeye gerek yok, `%APPDATA%`
-  yerine `~/Library/Application Support/Godot/export_templates/`'e
-  aynı şekilde açılır.
-- SCons (`pip install scons` — Windows'takiyle aynı adım).
-- `godot-cpp` submodule'ü zaten repoda (`git submodule update --init`).
-- Apple ID (ücretsiz) fiziksel cihaza debug build kurmak için yeterli
-  (7 günde bir yeniden imzalama gerekir); TestFlight/App Store için
-  ücretli Apple Developer hesabı ($99/yıl) gerekir — şimdilik gerekmez.
+- **`stream_client.cpp`**: the build condition was widened from
+  `#ifdef ANDROID_ENABLED` to
+  `#if defined(ANDROID_ENABLED) || defined(IOS_ENABLED)`.
+  Since the POSIX sockets code is identical on Android and iOS, this was a
+  safe, mechanical fix (didn't require a Mac, verified via the Android
+  build) — StreamSink/StreamClient will now actually work on iOS too, with
+  no extra code needed.
+- This document (`docs/IOS_HANDOVER.md`).
 
-**Derleme komutları** (Android/Windows deseninin aynısı):
+---
+
+## 7. Toolchain (to set up on the Mac)
+
+- Xcode (latest stable) — from the App Store.
+- Godot 4.6.x editor (macOS `.dmg`/`.zip`) — the export template package
+  (`Godot_v4.6.1-stable_export_templates.tpz`, the **exact same file**
+  already downloaded on Windows, platform-independent) already includes the
+  iOS and macOS templates, no separate download needed; it unpacks the same
+  way into `~/Library/Application Support/Godot/export_templates/` instead
+  of `%APPDATA%`.
+- SCons (`pip install scons` — same step as on Windows).
+- The `godot-cpp` submodule is already in the repo (`git submodule update --init`).
+- A free Apple ID is enough to install a debug build on a physical device
+  (needs re-signing every 7 days); TestFlight/App Store requires a paid
+  Apple Developer account ($99/year) — not needed for now.
+
+**Build commands** (same pattern as Android/Windows):
 ```bash
-# iOS cihaz (arm64, simulator degil)
+# iOS device (arm64, not the simulator)
 cd mobile/native
 scons platform=ios arch=arm64 ios_simulator=no target=template_debug
 
-# editorun kendi platformu (macOS) icin de derlemek gerekir
+# also need to build for the editor's own platform (macOS)
 scons platform=macos target=template_debug
 ```
 
 ---
 
-## 8. Önerilen kilometre taşı sırası (Android M1-M6 ile paralel)
+## 8. Suggested milestone order (parallel to Android's M1-M6)
 
-| # | Aşama | Doğrulama |
+| # | Stage | Verification |
 |---|---|---|
-| iM0 | Araç zinciri + `platform=macos` derlemesi + boş projede editör açılışı | Android M1'in editör-yükleme kısmına denk |
-| iM1 | `avf_capture_session.mm` (ARKit değil, önce ham AVFoundation) + `imu_sampler_ios.mm` | Kare/Hz sayaçları, crash yok |
-| iM2 | `h264_encoder_ios.cpp` (VideoToolbox), yerel dosyaya kayıt | `ffprobe` ile doğrula (Android M3 ile aynı yöntem) |
-| iM3 | Uçtan uca aynı-LAN akış testi | **`server/` hiç değişmeden çalışmalı** — protokol zaten platform-bağımsız test edildi |
-| iM4 | Rotasyon (§5.2) | Ekran görüntüsüyle görsel doğrulama (Android'de yaptığımız gibi) |
-| iM5 | `arkit_capture_session.mm` (ARKit'in kendisi) | Gerçek cihazda pose/point-cloud/intrinsics — **Simulator'da ARKit çalışmaz, gerçek iPhone/iPad şart** |
+| iM0 | Toolchain + `platform=macos` build + editor opens the empty project | Equivalent to Android M1's editor-loading step |
+| iM1 | `avf_capture_session.mm` (plain AVFoundation first, not ARKit) + `imu_sampler_ios.mm` | Frame/Hz counters, no crashes |
+| iM2 | `h264_encoder_ios.cpp` (VideoToolbox), recording to a local file | Verify with `ffprobe` (same method as Android M3) |
+| iM3 | End-to-end same-LAN streaming test | **`server/` should work completely unchanged** — the protocol was already tested platform-independently |
+| iM4 | Rotation (§5.2) | Visual verification via screenshot (same as we did on Android) |
+| iM5 | `arkit_capture_session.mm` (ARKit itself) | pose/point-cloud/intrinsics on a real device — **ARKit doesn't work in the Simulator, a real iPhone/iPad is required** |
 
-iM0-iM4 aslında **fiziksel bir iPhone olmadan, sadece Mac ile** yapılabilir
-(Simulator'da AVFoundation kamera desteklenmez ama derleme/link/protokol
-doğrulaması Mac tek başına yeterli — bkz. konuşmamızdaki SimCam notu,
-CI'da kare-üretimi testi için ileride kullanılabilir). iM5 (ARKit'in
-gerçekten çalışması) için gerçek cihaz şart.
+iM0-iM4 can actually be done **with just a Mac, no physical iPhone needed**
+(the Simulator doesn't support the AVFoundation camera, but build/link/
+protocol verification is fully covered by the Mac alone — see the SimCam
+note from our conversation, which could later be used for frame-generation
+testing in CI). iM5 (ARKit actually working) requires a real device.

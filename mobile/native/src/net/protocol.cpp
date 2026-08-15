@@ -6,9 +6,9 @@ namespace arstream::protocol {
 
 namespace {
 
-// Big-endian yazma/okuma yardimcilari -- OS soket basliklari (htonl vb.)
-// KASITLI kullanilmiyor, boylece bu dosya host'ta soket kutuphanesi
-// baglamadan da derlenir.
+// Big-endian write/read helpers -- OS socket headers (htonl etc.) are
+// DELIBERATELY not used, so this file also builds on the host without
+// linking a socket library.
 
 void put_u8(std::vector<uint8_t> &buf, uint8_t v) {
 	buf.push_back(v);
@@ -84,7 +84,7 @@ bool get_f32be(const uint8_t *p, size_t size, size_t offset, float &out) {
 	return true;
 }
 
-// Header'i yazip ardindan payload'i ekleyen ortak govde.
+// Shared body: writes the header, then appends the payload.
 std::vector<uint8_t> wrap(MsgType type, uint32_t seq, const std::vector<uint8_t> &payload) {
 	Header h;
 	h.payload_length = static_cast<uint32_t>(payload.size());
@@ -141,7 +141,7 @@ bool next_message(const uint8_t *buffer, size_t size, MessageView &out, size_t &
 	}
 	size_t total = kHeaderSize + h.payload_length;
 	if (size < total) {
-		return false; // henuz tam mesaj gelmemis
+		return false; // a complete message hasn't arrived yet
 	}
 	out.header = h;
 	out.payload = buffer + kHeaderSize;

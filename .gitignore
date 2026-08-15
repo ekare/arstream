@@ -12,7 +12,7 @@ mobile/bin/
 **/*.o
 compile_commands.json
 
-# --- Host-native protokol testi (mobile/native/tests/) ---
+# --- Host-native protocol test (mobile/native/tests/) ---
 mobile/native/tests/.sconsign.dblite
 mobile/native/tests/protocol_test
 mobile/native/tests/protocol_test.exe
@@ -20,13 +20,13 @@ mobile/native/tests/protocol_test.exp
 mobile/native/tests/protocol_test.lib
 mobile/native/tests/protocol_test.pdb
 
-# --- Android NDK / Gradle leftovers (yalnız araç zinciri; proje Kotlin/Gradle KULLANMIYOR) ---
+# --- Android NDK / Gradle leftovers (toolchain only; the project does NOT use Kotlin/Gradle) ---
 .gradle/
 local.properties
 *.apk
 *.aab
 
-# --- iOS / Xcode (ileride) ---
+# --- iOS / Xcode (future) ---
 *.xcodeproj/
 *.xcworkspace/
 DerivedData/
@@ -46,9 +46,10 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# --- Yakalanan test verisi / çıktılar ---
+# --- Captured test data / outputs ---
 server/captures/
 *.log
+*.pid
 
 # --- IDE / OS ---
 .vscode/

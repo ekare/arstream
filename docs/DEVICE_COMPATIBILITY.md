@@ -1,78 +1,78 @@
-# Cihaz Uyumluluk Bulguları
+# Device Compatibility Findings
 
-Bu doküman, ARCore/Camera2/IMU yakalama yollarının hangi cihazlarda test edildiğini ve ne bulunduğunu takip eder. `CaptureController`'ın ARCore-vs-geri-düşüş kararı bu bulgulara dayanır.
+This document tracks which devices the ARCore/Camera2/IMU capture paths have been tested on and what was found. `CaptureController`'s ARCore-vs-fallback decision is based on these findings.
 
 ---
 
 ## Samsung Galaxy A30s (SM-A307FN)
 
-**Tarih:** 2026-08-15 · **Yöntem:** ADB üzerinden pasif tanılama (henüz uygulama kodu yazılmadı — M0 spike'ının kod-gerektirmeyen kısmı)
+**Date:** 2026-08-15 · **Method:** passive diagnostics via ADB (no app code written yet — the code-free part of the M0 spike)
 
-| Alan | Değer |
+| Field | Value |
 |---|---|
 | Model | SM-A307FN |
-| Android sürümü | 11 (API 30) |
-| CPU ABI | arm64-v8a (ayrıca armeabi-v7a, armeabi uyumlu) |
+| Android version | 11 (API 30) |
+| CPU ABI | arm64-v8a (also compatible with armeabi-v7a, armeabi) |
 | Chipset | Exynos 7904 (`universal7904`) |
 
-### ARCore durumu — **beklenenden iyimser**
+### ARCore status — **more optimistic than expected**
 
-Proje planlamasında topluluk kaynaklarına dayanarak "A30s muhtemelen ARCore-sertifikalı cihaz listesinde değil" varsayımıyla yola çıkılmıştı (düz A30 listede, A30s değil, diye raporlanıyordu). Doğrudan cihaz kontrolü bunu **desteklemiyor**:
+Project planning started from the assumption, based on community sources, that "the A30s is probably not on ARCore's certified-device list" (the plain A30 was reported as listed, the A30s was not). Direct device inspection **doesn't support this**:
 
-- `com.google.ar.core` (Google Play Services for AR) **kurulu**, versiyon `1.54.260890083` (`minSdk=29, targetSdk=36`) — yakın zamanda güncellenmiş.
-- Google Play Services (`com.google.android.gms`) güncel: `26.30.32`.
-- Play Store (`com.android.vending`) mevcut.
+- `com.google.ar.core` (Google Play Services for AR) **is installed**, version `1.54.260890083` (`minSdk=29, targetSdk=36`) — recently updated.
+- Google Play Services (`com.google.android.gms`) is current: `26.30.32`.
+- The Play Store (`com.android.vending`) is present.
 
-**Yorum:** Paket varlığı ve Play Store'un cihaza aktif güncelleme yolluyor olması, cihazın Google'ın uygunluk filtrelerinden tamamen elenmediğine işaret eden güçlü bir sinyal — ama **kesin kanıt değil** (ARCore paketi elle/yan-yükleme ile de kurulabilir). **Kesin cevap yalnız `ArCoreApk_checkAvailability()`'nin gerçek runtime dönüşüyle** gelir — bu, M1'de GDExtension iskeleti ayağa kalkınca ilk doğrulanacak şey.
+**Interpretation:** The package being present and the Play Store actively pushing updates to the device is a strong signal that the device hasn't been entirely filtered out by Google's eligibility checks — but it's **not conclusive proof** (the ARCore package could also be installed manually/sideloaded). **The definitive answer only comes from `ArCoreApk_checkAvailability()`'s actual runtime result** — the first thing to verify once the GDExtension skeleton is up in M1.
 
-**Sonuç:** M0'ın önceki "muhtemelen yalnız geri-düşüş yolu test edilebilecek" varsayımı gevşetildi — ARCore yolunun da bu cihazda test edilebilir olma ihtimali yüksek. Yine de `CaptureController` her iki yolu da (ARCore + Camera2 geri düşüş) runtime kararıyla destekleyecek şekilde inşa edilmeye devam ediyor; bu bulgu mimariyi değiştirmiyor, yalnızca hangi yolun önce doğrulanacağına dair beklentiyi güncelliyor.
+**Conclusion:** M0's earlier assumption of "the ARCore path will probably not be testable on this device" has been relaxed — there's a good chance the ARCore path can be tested on this device too. `CaptureController` is still being built to support both paths (ARCore + Camera2 fallback) with a runtime decision; this finding doesn't change the architecture, only the expectation of which path gets verified first.
 
-### Donanım H.264 (AVC) encoder — **doğrulandı**
+### Hardware H.264 (AVC) encoder — **verified**
 
-`/vendor/etc/media_codecs.xml` içinde:
+In `/vendor/etc/media_codecs.xml`:
 ```
 <MediaCodec name="OMX.Exynos.AVC.Encoder" type="video/avc" >
 <MediaCodec name="OMX.Exynos.AVC.Encoder.secure" type="video/avc-wfd" >
 ```
-`AMediaCodec` (NDK) üzerinden bu encoder'a erişim M3'te doğrulanacak, ama varlığı kesin.
+Actually accessing this encoder via `AMediaCodec` (NDK) will be verified in M3, but its presence is confirmed.
 
-### Bilinen tutarsızlık — minSdk beyanı vs. gerçek gereksinim (M2/M3'te bulundu)
+### Known inconsistency — declared minSdk vs. actual requirement (found in M2/M3)
 
-`H264EncoderAndroid`, sıfır-kopya (Camera→Surface→Encoder) yol için `AMediaCodec_createInputSurface`/`AMediaCodec_signalEndOfInputStream` kullanıyor — bunlar **API 26+** gerektiriyor (derleme `android_api_level=26` ile yapılıyor). Ama şu anki basit (non-Gradle) export yolunda `export_presets.cfg`'nin `gradle_build/min_sdk` alanı **kullanılamıyor** ("Use Gradle Build" kapalıyken Godot bunu reddediyor) — yani üretilen APK'nın manifest'i, Godot'un hazır şablonunun gömülü minSdk'sini (muhtemelen 24) taşımaya devam ediyor. Bu, API 24-25 bir cihazda .so'nun eksik sembollerle çökeceği anlamına gelir; A30s (API 30) için sorun değil ama gerçek dağıtımdan önce çözülmeli:
-- **A seçeneği:** `gradle_build/use_gradle_build=true`'ya geçip minSdk'yi 26'ya doğru beyan et (daha karmaşık build).
-- **B seçeneği:** API 24-25 için `AImageReader`+ByteBuffer tabanlı bir geri-düşüş encoder yolu ekle (daha fazla kod, sıfır-kopya değil).
-Şimdilik dokümante edilen bilinen açık; A30s testleri etkilenmiyor.
+`H264EncoderAndroid` uses `AMediaCodec_createInputSurface`/`AMediaCodec_signalEndOfInputStream` for the zero-copy (Camera→Surface→Encoder) path — these require **API 26+** (the build uses `android_api_level=26`). But in the current simple (non-Gradle) export path, `export_presets.cfg`'s `gradle_build/min_sdk` field **can't be used** (Godot rejects it while "Use Gradle Build" is off) — meaning the generated APK's manifest still carries Godot's stock template's embedded minSdk (likely 24). This means the `.so` would crash with missing symbols on an API 24-25 device; not an issue for the A30s (API 30), but needs to be resolved before real distribution:
+- **Option A:** switch to `gradle_build/use_gradle_build=true` and declare minSdk as 26 (more complex build).
+- **Option B:** add an `AImageReader`+ByteBuffer-based fallback encoder path for API 24-25 (more code, not zero-copy).
+For now this is a documented known gap; it doesn't affect A30s testing.
 
-### IMU — **doğrulandı, hız sınırı not edildi**
+### IMU — **verified, rate limit noted**
 
-`dumpsys sensorservice` çıktısı (STM LSM6DSL paketi):
+`dumpsys sensorservice` output (STM LSM6DSL package):
 
-| Sensör | Sürücü | Mod | Hız aralığı |
+| Sensor | Driver | Mode | Rate range |
 |---|---|---|---|
 | Accelerometer | LSM6DSL | continuous, non-wakeUp, no batching | 5.00–100.00 Hz |
 | Gyroscope | LSM6DSL | continuous, non-wakeUp, no batching | 5.00–100.00 Hz |
-| Gyroscope (uncalibrated) | LSM6DSL | aynı | aynı |
+| Gyroscope (uncalibrated) | LSM6DSL | same | same |
 
-**Not:** Maksimum 100Hz, bazı üst-segment cihazlardaki 200–400Hz gyro'ya göre düşük ama VIO-tarzı kullanım için işlevsel. `SENSOR_DELAY_GAME` bu cihazda pratikte ~100Hz'e tekabül edecek. `ImuSampler`'ı sabit bir hedef hız varsaymadan, `ASensor_getMinDelay()` ile cihazdan okuyacak şekilde yazmak gerekiyor — sihirli sayı yasağıyla tutarlı.
+**Note:** A max of 100Hz is lower than the 200–400Hz gyro on some higher-end devices, but usable for VIO-style purposes. `SENSOR_DELAY_GAME` will in practice correspond to ~100Hz on this device. `ImuSampler` needs to be written to read the rate from the device via `ASensor_getMinDelay()` rather than assuming a fixed target rate — consistent with the no-magic-numbers rule.
 
-**Doğrulanmadı (kod gerektiriyor, M1/M2'de ele alınacak):** `SensorEvent.timestamp` ile `SystemClock.elapsedRealtimeNanos()` arasındaki epoch/drift tutarlılığı — ADB pasif kontrolüyle ölçülemez, gerçek örnekleme koduyla test edilmeli.
+**Not yet verified (requires code, to be handled in M1/M2):** epoch/drift consistency between `SensorEvent.timestamp` and `SystemClock.elapsedRealtimeNanos()` — can't be measured via passive ADB inspection, needs to be tested with actual sampling code.
 
 ---
 
-## Şablon — yeni cihaz eklerken
+## Template — when adding a new device
 
 ```markdown
-## <Marka Model> (<kod adı>)
+## <Brand Model> (<codename>)
 
-**Tarih:** · **Yöntem:**
+**Date:** · **Method:**
 
-| Alan | Değer |
+| Field | Value |
 |---|---|
-| Android sürümü | |
+| Android version | |
 | CPU ABI | |
 | Chipset | |
 
-### ARCore durumu
-### Donanım H.264 encoder
+### ARCore status
+### Hardware H.264 encoder
 ### IMU
 ```

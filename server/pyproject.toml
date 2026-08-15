@@ -5,12 +5,15 @@ build-backend = "hatchling.build"
 [project]
 name = "arstream-server"
 version = "0.1.0"
-description = "arstream kablo protokolunu (docs/PROTOCOL.md) konusan referans alici -- dogrulama + yasayan dokumantasyon, uretim ingestion servisi degil."
+description = "Reference receiver speaking the arstream wire protocol (docs/PROTOCOL.md) + a plugin-based web dashboard -- verification and living documentation, not a production ingestion service."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27"]
 video = ["av"]
 
 [project.scripts]

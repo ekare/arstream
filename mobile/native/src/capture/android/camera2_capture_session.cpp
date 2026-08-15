@@ -9,12 +9,12 @@ namespace {
 
 void on_device_disconnected(void *context, ACameraDevice *device) {
 	(void)device;
-	static_cast<Camera2CaptureSession *>(context)->notify_error("Kamera baglantisi kesildi");
+	static_cast<Camera2CaptureSession *>(context)->notify_error("Camera connection lost");
 }
 
 void on_device_error(void *context, ACameraDevice *device, int error) {
 	(void)device;
-	static_cast<Camera2CaptureSession *>(context)->notify_error("Kamera hatasi (kod " + std::to_string(error) + ")");
+	static_cast<Camera2CaptureSession *>(context)->notify_error("Camera error (code " + std::to_string(error) + ")");
 }
 
 void on_session_closed(void *context, ACameraCaptureSession *session) {
@@ -32,8 +32,9 @@ void on_session_active(void *context, ACameraCaptureSession *session) {
 	(void)session;
 }
 
-// AImageReader onizleme karesi geldiginde cagrilir. preview_enabled degilse
-// hemen birak -- boylece CPU maliyeti yalniz kullanici onizlemeyi actiginda var.
+// Called when the AImageReader has a new preview frame. Bails out
+// immediately if preview_enabled is false -- so the CPU cost only exists
+// while the user has actually turned preview on.
 void on_preview_image_available(void *context, AImageReader *reader) {
 	auto *self = static_cast<Camera2CaptureSession *>(context);
 	AImage *image = nullptr;
@@ -99,8 +100,8 @@ std::string Camera2CaptureSession::find_back_camera_id() {
 	}
 
 	if (result.empty() && id_list->numCameras > 0) {
-		// Arka kamera bulunamadiysa ilk kamerayla devam et (ornegin yalniz on
-		// kameralı bir cihaz).
+		// Fall back to the first camera if no back camera was found (e.g. a
+		// front-camera-only device).
 		result = id_list->cameraIds[0];
 	}
 
@@ -162,13 +163,13 @@ bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width,
 
 	manager_ = ACameraManager_create();
 	if (manager_ == nullptr) {
-		out_error = "ACameraManager olusturulamadi";
+		out_error = "Could not create ACameraManager";
 		return false;
 	}
 
 	std::string camera_id = find_back_camera_id();
 	if (camera_id.empty()) {
-		out_error = "Kullanilabilir kamera bulunamadi";
+		out_error = "No available camera found";
 		ACameraManager_delete(manager_);
 		manager_ = nullptr;
 		return false;
@@ -181,16 +182,16 @@ bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width,
 
 	camera_status_t open_status = ACameraManager_openCamera(manager_, camera_id.c_str(), &device_callbacks, &device_);
 	if (open_status != ACAMERA_OK || device_ == nullptr) {
-		out_error = "Kamera acilamadi (kod " + std::to_string(open_status) + ") -- CAMERA izni verildi mi?";
+		out_error = "Could not open camera (code " + std::to_string(open_status) + ") -- was CAMERA permission granted?";
 		ACameraManager_delete(manager_);
 		manager_ = nullptr;
 		return false;
 	}
 
-	// Onizleme okuyucusu: kucuk cozunurluk, YUV420 -- yalniz Y (parlaklik)
-	// duzlemi kullanilir, gri tonlamali basit bir onizleme icin yeterli.
+	// Preview reader: small resolution, YUV420 -- only the Y (luma) plane is
+	// used, enough for a simple grayscale preview.
 	if (AImageReader_new(preview_width, preview_height, AIMAGE_FORMAT_YUV_420_888, 2, &preview_reader_) != AMEDIA_OK || preview_reader_ == nullptr) {
-		out_error = "Onizleme AImageReader olusturulamadi";
+		out_error = "Could not create preview AImageReader";
 		stop();
 		return false;
 	}
@@ -201,27 +202,35 @@ bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width,
 
 	ANativeWindow *preview_window = nullptr;
 	if (AImageReader_getWindow(preview_reader_, &preview_window) != AMEDIA_OK || preview_window == nullptr) {
-		out_error = "Onizleme surface'i alinamadi";
+		out_error = "Could not get preview surface";
 		stop();
 		return false;
 	}
 
 	ACaptureSessionOutputContainer_create(&output_container_);
 
-	ACaptureSessionOutput_create(encoder_surface, &encoder_output_);
-	ACaptureSessionOutputContainer_add(output_container_, encoder_output_);
-	ACameraOutputTarget_create(encoder_surface, &encoder_target_);
+	// If there's no encoder_surface (preview-only mode), the encoder target
+	// is never added -- encoder_target_/encoder_output_ stay nullptr, and
+	// stop() already null-checks them.
+	if (encoder_surface != nullptr) {
+		ACaptureSessionOutput_create(encoder_surface, &encoder_output_);
+		ACaptureSessionOutputContainer_add(output_container_, encoder_output_);
+		ACameraOutputTarget_create(encoder_surface, &encoder_target_);
+	}
 
 	ACaptureSessionOutput_create(preview_window, &preview_output_);
 	ACaptureSessionOutputContainer_add(output_container_, preview_output_);
 	ACameraOutputTarget_create(preview_window, &preview_target_);
 
-	if (ACameraDevice_createCaptureRequest(device_, TEMPLATE_RECORD, &request_) != ACAMERA_OK || request_ == nullptr) {
-		out_error = "Capture request olusturulamadi";
+	ACameraDevice_request_template template_type = (encoder_surface != nullptr) ? TEMPLATE_RECORD : TEMPLATE_PREVIEW;
+	if (ACameraDevice_createCaptureRequest(device_, template_type, &request_) != ACAMERA_OK || request_ == nullptr) {
+		out_error = "Could not create capture request";
 		stop();
 		return false;
 	}
-	ACaptureRequest_addTarget(request_, encoder_target_);
+	if (encoder_target_ != nullptr) {
+		ACaptureRequest_addTarget(request_, encoder_target_);
+	}
 	ACaptureRequest_addTarget(request_, preview_target_);
 
 	ACameraCaptureSession_stateCallbacks session_callbacks = {};
@@ -231,13 +240,13 @@ bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width,
 	session_callbacks.onActive = on_session_active;
 
 	if (ACameraDevice_createCaptureSession(device_, output_container_, &session_callbacks, &session_) != ACAMERA_OK || session_ == nullptr) {
-		out_error = "Capture session olusturulamadi";
+		out_error = "Could not create capture session";
 		stop();
 		return false;
 	}
 
 	if (ACameraCaptureSession_setRepeatingRequest(session_, nullptr, 1, &request_, nullptr) != ACAMERA_OK) {
-		out_error = "Repeating request baslatilamadi";
+		out_error = "Could not start repeating request";
 		stop();
 		return false;
 	}

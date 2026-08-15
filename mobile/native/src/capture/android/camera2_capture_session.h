@@ -13,33 +13,42 @@
 
 namespace arstream {
 
-// ARCore yokken (ya da devre disiyken) kullanilan geri-dusus yol: ham Camera2
-// NDK yakalamasi. Ayni capture request iki hedefe BIRDEN yazar -- encoder'in
-// giris surface'i (sifir-kopya, hep aktif) ve bir onizleme AImageReader'i
-// (kucuk cozunurluk, yalniz preview_enabled=true iken CPU'da islenir). Boylece
-// onizlemeyi ac/kapat kaydi hic kesintiye ugratmaz -- ayni oturum, ayni
-// repeating request, tek fark islenip islenmedigi.
+// The fallback path used when ARCore is unavailable (or disabled): raw
+// Camera2 NDK capture. While recording/streaming, the same capture request
+// writes to TWO targets at once -- the encoder's input surface (zero-copy,
+// always active) and a preview AImageReader (small resolution, only
+// processed on CPU while preview_enabled=true). This means toggling preview
+// on/off never interrupts recording -- same session, same repeating
+// request, the only difference is whether the frame gets processed. Outside
+// of recording/streaming it can also be opened for preview ONLY, with
+// encoder_surface=nullptr (see ArCapture::set_preview_enabled) -- single
+// target, TEMPLATE_PREVIEW.
 class Camera2CaptureSession {
 public:
 	using ErrorCallback = std::function<void(const std::string &message)>;
-	// y_plane verisi callback donduktan sonra gecersiz olur -- alan senkron kopyalamali.
+	// y_plane data becomes invalid once the callback returns -- the caller must copy it synchronously.
 	using PreviewFrameCallback = std::function<void(const uint8_t *y_plane, int32_t width, int32_t height, int32_t row_stride)>;
 
 	~Camera2CaptureSession();
 
-	// Kamera acilmadan (session baslamadan) BAGIMSIZ calisir -- kendi gecici
-	// ACameraManager'ini acar/kapatir. ArCapture bunu encoder baslamadan ONCE
-	// cagirir, cunku encoder'in ilk SPS/PPS ciktisi (VIDEO_CONFIG'e rotation
-	// bilgisini tasiyacak) camera session'dan once gelebilir.
+	// Works INDEPENDENTLY of opening the camera (starting a session) --
+	// opens/closes its own temporary ACameraManager. ArCapture calls this
+	// BEFORE starting the encoder, because the encoder's first SPS/PPS
+	// output (which will carry the rotation info into VIDEO_CONFIG) may
+	// arrive before the camera session does.
 	//
-	// ACAMERA_SENSOR_ORIENTATION: sensorun ham ciktisini cihazin dogal
-	// (portrait) yonune getirmek icin SAAT YONUNDE kac derece dondurulmesi
-	// gerektigi -- 0/90/180/270. Cogu telefonda arka kamera icin 90'dir ama
-	// sabit varsayilmaz, cihazdan okunur. Basarisiz olursa 0 doner (dondurme
-	// yok varsayilir -- ekran/kayit yamuk olabilir ama coker/yanlis boyut
-	// vermez).
+	// ACAMERA_SENSOR_ORIENTATION: how many degrees CLOCKWISE the sensor's
+	// raw output needs to be rotated to reach the device's natural
+	// (portrait) orientation -- 0/90/180/270. It's 90 for the back camera on
+	// most phones, but this isn't assumed fixed -- it's read from the
+	// device. Returns 0 on failure (assumes no rotation -- the
+	// display/recording may look skewed, but it won't crash or produce the
+	// wrong size).
 	static int32_t query_back_camera_sensor_orientation();
 
+	// encoder_surface may be nullptr -- in that case only the preview target
+	// is added to the capture request (TEMPLATE_PREVIEW). Used by
+	// ArCapture::set_preview_enabled() for preview-only mode outside of recording/streaming.
 	bool start(ANativeWindow *encoder_surface, int32_t width, int32_t height,
 			int32_t preview_width, int32_t preview_height,
 			ErrorCallback on_error, PreviewFrameCallback on_preview_frame,
@@ -49,7 +58,7 @@ public:
 	void set_preview_enabled(bool enabled) { preview_enabled_ = enabled; }
 	bool is_preview_enabled() const { return preview_enabled_; }
 
-	// C callback'lerin erisebilmesi icin public -- gercek mantik yok, sadece yonlendirme.
+	// Public so the C callbacks can reach it -- no real logic here, just routing.
 	void notify_error(const std::string &message);
 	void notify_preview_frame(const uint8_t *y_plane, int32_t width, int32_t height, int32_t row_stride);
 	AImageReader *preview_reader() const { return preview_reader_; }

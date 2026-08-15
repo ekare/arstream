@@ -11,11 +11,11 @@
 
 namespace arstream {
 
-// NDK AMediaCodec sarmalayicisi. Girisi bir ANativeWindow (Surface) --
-// Camera2CaptureSession dogrudan bu surface'e kare yazar, CPU tarafinda
-// YUV kopyalama/format donusumu yok (donanim hizlandirmali, sifir-kopya).
-// Cikis Annex-B NAL birimleri; AMediaCodec'in video/avc encoder'lari bunu
-// dogal olarak uretir, ekstra donusum gerekmez.
+// Wrapper around the NDK AMediaCodec. Its input is an ANativeWindow
+// (Surface) -- Camera2CaptureSession writes frames directly to this
+// surface, no CPU-side YUV copy/format conversion (hardware-accelerated,
+// zero-copy). Output is Annex-B NAL units; AMediaCodec's video/avc encoders
+// produce this natively, no extra conversion needed.
 class H264EncoderAndroid {
 public:
 	struct Config {
@@ -26,14 +26,14 @@ public:
 	};
 
 	using ChunkCallback = std::function<void(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe)>;
-	// SPS/PPS (AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) icin AYRI callback --
-	// ChunkCallback'ten farkli olarak sirf govde tasir, keyframe kavrami yok.
+	// SEPARATE callback for SPS/PPS (AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) --
+	// unlike ChunkCallback, this just carries a body, there's no keyframe concept here.
 	using ConfigCallback = std::function<void(const uint8_t *sps_pps_annexb, size_t size)>;
 
 	~H264EncoderAndroid();
 
-	// Basarili olursa get_input_surface() dolu doner; Camera2CaptureSession
-	// bunu capture hedefi olarak kullanir.
+	// On success, get_input_surface() returns a valid surface;
+	// Camera2CaptureSession uses it as its capture target.
 	bool start(const Config &cfg, ConfigCallback on_config, ChunkCallback on_chunk, std::string &out_error);
 	void stop();
 

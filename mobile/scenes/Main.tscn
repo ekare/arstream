@@ -1,6 +1,13 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_red_dot"]
+bg_color = Color(0.9, 0.15, 0.15, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
 
 [node name="Main" type="Control"]
 layout_mode = 3
@@ -37,7 +44,7 @@ text = "Ping native"
 
 [node name="ResultLabel" type="Label" parent="Overlay"]
 layout_mode = 2
-text = "(henuz ping atilmadi)"
+text = "(no ping sent yet)"
 
 [node name="HSeparator" type="HSeparator" parent="Overlay"]
 layout_mode = 2
@@ -53,12 +60,25 @@ placeholder_text = "host:port"
 [node name="CaptureButton" type="Button" parent="Overlay"]
 layout_mode = 2
 disabled = true
-text = "Yakalamayi baslat"
+text = "Start capture"
 
 [node name="StatusLabel" type="Label" parent="Overlay"]
 layout_mode = 2
-text = "Kamera izni bekleniyor..."
+text = "Waiting for camera permission..."
 autowrap_mode = 2
+
+[node name="RecordingIndicator" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -40.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 40.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_red_dot")
 
 [node name="PreviewButton" type="CheckButton" parent="."]
 layout_mode = 1
@@ -74,7 +94,7 @@ offset_bottom = -20.0
 grow_horizontal = 2
 grow_vertical = 0
 disabled = true
-text = "Onizleme"
+text = "Preview"
 
 [connection signal="pressed" from="Overlay/PingButton" to="." method="_on_ping_button_pressed"]
 [connection signal="pressed" from="Overlay/CaptureButton" to="." method="_on_capture_button_pressed"]

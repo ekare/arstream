@@ -6,8 +6,8 @@
 
 namespace arstream {
 
-// Annex-B akisini oldugu gibi bir dosyaya yazar (SPS/PPS + kareler sirayla) --
-// ffprobe/ffplay ile dogrudan oynatilabilir ham H.264 elementary stream.
+// Writes the Annex-B stream to a file as-is (SPS/PPS + frames in order) --
+// a raw H.264 elementary stream that can be played directly with ffprobe/ffplay.
 class FileSink : public OutputSink {
 public:
 	~FileSink() override;

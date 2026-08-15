@@ -14,23 +14,25 @@
 
 namespace arstream {
 
-// docs/PROTOCOL.md'yi konusan, TCP kopmalarina karsi dayanikli gonderici.
+// The sender that speaks docs/PROTOCOL.md, resilient to TCP drops.
 //
-// Kural: write_chunk()/write_video_config() (encoder thread'inden cagirilir)
-// HICBIR ZAMAN aga dokunmaz, HICBIR ZAMAN bloklamaz -- yalniz bir kuyruga
-// (bellek, dolarsa disk) yazar. Ayri bir sender thread'i baglantiyi yonetir
-// (baglan/kopunca yeniden dene, us tel geri-cekilme ile) ve kuyrugu bosaltir.
+// Rule: write_chunk()/write_video_config() (called from the encoder thread)
+// NEVER touch the network, NEVER block -- they only write into a queue
+// (memory, overflowing to disk if it fills up). A separate sender thread
+// manages the connection (connects, retries on drop with exponential
+// backoff) and drains the queue.
 //
-// Bellek-once, disk-tasma: kuyruk dolana kadar her sey bellekte (deque).
-// Doldugunda "tasma modu"na girilir -- bu moddayken YENI gelen veri de
-// (bellekte yer acilmis olsa bile) diske yazilir, ta ki disk kuyrugu
-// TAMAMEN gonderilip bellek+disk bosalana kadar. Boylece bellek her zaman
-// kuyrugun EN ESKI (once gonderilecek) ucunu, disk ise arkasini tutar --
-// bellek yer actikca yeni verinin araya girip sirayi bozmasi engellenir.
+// Memory-first, disk-overflow: everything stays in memory (a deque) until
+// the queue fills up. Once full, it enters "overflow mode" -- while in this
+// mode, NEWLY arriving data also gets written to disk (even if memory has
+// freed up room), until the disk queue is FULLY sent and both memory and
+// disk drain completely. This way memory always holds the OLDEST (next to
+// be sent) end of the queue, and disk holds what's behind it -- preventing
+// newer data from jumping the queue as memory frees up space.
 class StreamSink : public OutputSink {
 public:
-	// spool_path: tasma disk dosyasi (bir onceki oturumdan kalmis olabilir,
-	// acilista temizlenir). max_memory_bytes: bellek kuyrugunun tavani.
+	// spool_path: the overflow disk file (may be left over from a previous
+	// session, cleared on open). max_memory_bytes: the memory queue's cap.
 	explicit StreamSink(std::string spool_path, size_t max_memory_bytes = 8 * 1024 * 1024);
 	~StreamSink() override;
 
@@ -39,7 +41,7 @@ public:
 	void write_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) override;
 	void close() override;
 
-	// Tanilama -- ileride ArCapture uzerinden GDScript'e aktarilabilir.
+	// Diagnostics -- could be exposed to GDScript via ArCapture later.
 	int64_t queued_bytes() const;
 	bool is_connected() const { return connected_; }
 
@@ -61,18 +63,18 @@ private:
 	uint16_t port_ = 0;
 	uint32_t video_config_seq_ = 1;
 	uint32_t video_chunk_seq_ = 1;
-	// VIDEO_CONFIG (SPS/PPS) FIFO kuyruguna girmez -- docs/PROTOCOL.md'nin
-	// istedigi gibi HER (yeniden) baglantida en basta tekrar gonderilir,
-	// cunku yeni bir sunucu/oturum SPS/PPS'i hic gormemis olabilir.
+	// VIDEO_CONFIG (SPS/PPS) does not enter the FIFO queue -- as
+	// docs/PROTOCOL.md requires, it's resent at the very start of EVERY
+	// (re)connection, since a new server/session may never have seen the SPS/PPS.
 	std::vector<uint8_t> cached_video_config_;
 
 	std::thread sender_thread_;
 	std::atomic<bool> running_{ false };
 	std::atomic<bool> connected_{ false };
-	// close() cagirildiginda dolar -- kapanista kuyruk bosalana kadar
-	// SINIRSIZ beklemek yerine, cagiran thread'i (Godot ana thread'i) makul
-	// bir sure sonra serbest birakir; buyuk bir birikim varsa kalan kismi
-	// kayip olarak kabul edilir (bkz. sender_loop).
+	// Set when close() is called -- instead of waiting UNBOUNDED for the
+	// queue to drain on shutdown, this releases the calling thread (Godot's
+	// main thread) after a reasonable time; if there's a large backlog, the
+	// remainder is accepted as lost (see sender_loop).
 	std::chrono::steady_clock::time_point shutdown_deadline_;
 
 	void enqueue(std::vector<uint8_t> message);

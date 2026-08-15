@@ -5,16 +5,16 @@
 namespace arstream {
 
 namespace {
-// MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface -- NDK'da isimli sabiti
-// yok, sayisal degeri sabit ve kararli.
+// MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface -- there's no named
+// constant for this in the NDK, but its numeric value is fixed and stable.
 constexpr int32_t COLOR_FORMAT_SURFACE = 0x7f000789;
 constexpr int64_t DEQUEUE_TIMEOUT_US = 10000; // 10ms
 constexpr uint8_t kH264NalTypeIdrSlice = 5;
 
-// AMEDIACODEC_BUFFER_FLAG_KEY_FRAME NDK basligina gore API 34'ten once
-// guvenilir degil (bkz. NdkMediaCodec.h yorumu) -- A30s API 30, o yuzden bu
-// bayraga guvenmek yerine Annex-B NAL tipini (5=IDR) dogrudan kendimiz
-// okuyoruz. Platform/API'den bagimsiz, her zaman dogru.
+// Per the NDK header comment, AMEDIACODEC_BUFFER_FLAG_KEY_FRAME isn't
+// reliable before API 34 (see the comment in NdkMediaCodec.h) -- the A30s is
+// API 30, so instead of trusting this flag we read the Annex-B NAL type
+// (5=IDR) ourselves directly. Platform/API-independent, always correct.
 bool starts_with_idr_nal(const uint8_t *data, size_t size) {
 	size_t start = 0;
 	if (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 1) {
@@ -38,7 +38,7 @@ H264EncoderAndroid::~H264EncoderAndroid() {
 bool H264EncoderAndroid::start(const Config &cfg, ConfigCallback on_config, ChunkCallback on_chunk, std::string &out_error) {
 	codec_ = AMediaCodec_createEncoderByType("video/avc");
 	if (codec_ == nullptr) {
-		out_error = "video/avc encoder olusturulamadi";
+		out_error = "Could not create video/avc encoder";
 		return false;
 	}
 
@@ -54,7 +54,7 @@ bool H264EncoderAndroid::start(const Config &cfg, ConfigCallback on_config, Chun
 	media_status_t cfg_status = AMediaCodec_configure(codec_, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
 	AMediaFormat_delete(format);
 	if (cfg_status != AMEDIA_OK) {
-		out_error = "AMediaCodec_configure basarisiz (kod " + std::to_string(cfg_status) + ")";
+		out_error = "AMediaCodec_configure failed (code " + std::to_string(cfg_status) + ")";
 		AMediaCodec_delete(codec_);
 		codec_ = nullptr;
 		return false;
@@ -62,14 +62,14 @@ bool H264EncoderAndroid::start(const Config &cfg, ConfigCallback on_config, Chun
 
 	media_status_t surface_status = AMediaCodec_createInputSurface(codec_, &input_surface_);
 	if (surface_status != AMEDIA_OK || input_surface_ == nullptr) {
-		out_error = "Encoder giris surface'i olusturulamadi (kod " + std::to_string(surface_status) + ")";
+		out_error = "Could not create encoder input surface (code " + std::to_string(surface_status) + ")";
 		AMediaCodec_delete(codec_);
 		codec_ = nullptr;
 		return false;
 	}
 
 	if (AMediaCodec_start(codec_) != AMEDIA_OK) {
-		out_error = "AMediaCodec baslatilamadi";
+		out_error = "Could not start AMediaCodec";
 		ANativeWindow_release(input_surface_);
 		input_surface_ = nullptr;
 		AMediaCodec_delete(codec_);
@@ -106,7 +106,7 @@ void H264EncoderAndroid::drain_loop(ConfigCallback on_config, ChunkCallback on_c
 			}
 		}
 		// idx < 0: AMEDIACODEC_INFO_TRY_AGAIN_LATER / OUTPUT_FORMAT_CHANGED / OUTPUT_BUFFERS_CHANGED --
-		// hepsinde sadece bir sonraki turda tekrar denenir.
+		// in all cases we just try again on the next loop iteration.
 	}
 }
 

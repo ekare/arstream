@@ -1,57 +1,57 @@
-# arstream Kablo Protokolü — v1.0
+# arstream Wire Protocol — v1.0
 
-Bu doküman, mobil istemci (telefon) ile destination sunucusu (ve onun ardındaki adaptör) arasındaki **kanonik** kablo formatını tanımlar. Protokolün iki bağımsız implementasyonu bu depoda yaşar — `mobile/native/src/net/protocol_writer.cpp` (C++, yazan taraf) ve `server/src/arstream_server/protocol.py` (Python, okuyan taraf) — ikisi de bu dokümanın birebir yansıması olmalı. Üçüncü bir implementasyon (dış adaptör) yazacaksanız, doğru olan tek kaynak budur.
+This document defines the **canonical** wire format between the mobile client (phone) and the destination server (and any adapter behind it). Two independent implementations of the protocol live in this repo — `mobile/native/src/net/protocol_writer.cpp` (C++, the writer side) and `server/src/arstream_server/protocol.py` (Python, the reader side) — both must be a faithful mirror of this document. If you're writing a third implementation (an external adapter), this is the single source of truth.
 
-**Durum:** v1.0 — sabit, dokümante edilmiş sınırlarıyla üretim-öncesi ilk sürüm.
-
----
-
-## 0. Tasarım ilkeleri
-
-1. **Tek kalıcı TCP bağlantısı.** Telefon **client**'tır (sunucuya dışarı bağlanır), sunucu dinler. Bağlantı koptuğunda istemci `HELLO`'dan yeniden başlar.
-2. **Tüm mesajlar aynı 12 byte'lık başlığı taşır.** Bilinmeyen `msg_type` bile `payload_length` sayesinde güvenle atlanabilir — bu, protokolü baştan **ileri-uyumlu** yapar: eski bir okuyucu, yeni bir yazıcının bilmediği mesaj tiplerini kırılmadan atlayabilir.
-3. **Ham veri her zaman gider, ARCore alanları opsiyoneldir.** `HELLO`'daki `capabilities` ve `HELLO_ACK`'teki `negotiated` bunu açıkça pazarlık eder.
-4. **Zaman damgaları ikiye ayrılır**: cihazın kendi donanım saati (göreli sıralama/delta için — asıl önemli olan) ile `CLOCK_SYNC` üzerinden hesaplanan kaba mutlak-saat ofseti (loglama/hizalama için) birbirine karıştırılmaz.
-5. **v1'de şifreleme/kimlik doğrulama yok.** Güvenilir ağ varsayılır (bkz. §6). Bu bilinçli bir sınırdır, gözden kaçan bir eksiklik değil.
+**Status:** v1.0 — first pre-production release with fixed, documented limits.
 
 ---
 
-## 1. Taşıma katmanı
+## 0. Design principles
 
-- **Protokol:** TCP, tek bağlantı, istemci → sunucu yönünde açılır.
-- **Byte sırası:** Tüm çok-byte'lı tamsayılar **big-endian** (network byte order).
-- **String kodlama:** Tüm metin alanları UTF-8.
-- **JSON payload'lar:** Sıkıştırılmamış, tek satır, UTF-8.
+1. **A single persistent TCP connection.** The phone is the **client** (connects out to the server), the server listens. When the connection drops, the client restarts from `HELLO`.
+2. **Every message carries the same 12-byte header.** Even an unknown `msg_type` can be safely skipped thanks to `payload_length` — this makes the protocol **forward-compatible** by design: an old reader can skip message types it doesn't know about from a newer writer without breaking.
+3. **Raw data always flows; ARCore fields are optional.** `capabilities` in `HELLO` and `negotiated` in `HELLO_ACK` negotiate this explicitly.
+4. **Timestamps are kept strictly separate**: the device's own hardware clock (for relative ordering/deltas — the one that actually matters) is never mixed with the coarse absolute-clock offset computed via `CLOCK_SYNC` (for logging/alignment).
+5. **No encryption/authentication in v1.** A trusted network is assumed (see §6). This is a deliberate boundary, not an oversight.
 
 ---
 
-## 2. Mesaj başlığı (her mesajda, 12 byte, sabit)
+## 1. Transport layer
 
-| Ofset | Alan | Tip | Açıklama |
+- **Protocol:** TCP, single connection, opened client → server.
+- **Byte order:** All multi-byte integers are **big-endian** (network byte order).
+- **String encoding:** All text fields are UTF-8.
+- **JSON payloads:** Uncompressed, single-line, UTF-8.
+
+---
+
+## 2. Message header (every message, 12 bytes, fixed)
+
+| Offset | Field | Type | Description |
 |---|---|---|---|
-| 0 | `payload_length` | `uint32` | Başlıktan sonraki byte sayısı |
-| 4 | `msg_type` | `uint8` | Aşağıdaki tablo |
-| 5 | `flags` | `uint8` | v1'de rezerve, `0x00` |
-| 6 | `protocol_version` | `uint16` | v1 için `0x0001` |
-| 8 | `sequence_number` | `uint32` | Bağlantı başına, `msg_type` başına monoton artan sayaç (tanılama + ileride UDP/v2 uyumluluğu için) |
+| 0 | `payload_length` | `uint32` | Number of bytes following the header |
+| 4 | `msg_type` | `uint8` | See table below |
+| 5 | `flags` | `uint8` | Reserved in v1, `0x00` |
+| 6 | `protocol_version` | `uint16` | `0x0001` for v1 |
+| 8 | `sequence_number` | `uint32` | Monotonically increasing counter per connection, per `msg_type` (for diagnostics + future UDP/v2 compatibility) |
 
-Toplam: 12 byte başlık + `payload_length` byte payload.
+Total: 12-byte header + `payload_length` bytes of payload.
 
-**Bilinmeyen `msg_type` işleme kuralı:** Bir alıcı tanımadığı bir `msg_type` görürse, `payload_length` kadar byte'ı atlayıp bir sonraki başlığı okumaya devam eder. Bağlantıyı asla kapatmaz.
+**Rule for handling unknown `msg_type`:** If a receiver sees an unrecognized `msg_type`, it skips `payload_length` bytes and continues reading the next header. It never closes the connection.
 
 ---
 
-## 3. Mesaj tipleri
+## 3. Message types
 
-### 3.1 El sıkışma
+### 3.1 Handshake
 
-**`0x01 HELLO`** (client→server) — bağlantı açıldıktan hemen sonra, tek sefer.
+**`0x01 HELLO`** (client→server) — once, immediately after the connection opens.
 
 ```json
 {
-  "device_id": "string (kalıcı, cihaza özgü UUID)",
-  "device_model": "string (örn. SM-A307FN)",
-  "os_version": "string (örn. Android 11 / API 30)",
+  "device_id": "string (persistent, device-specific UUID)",
+  "device_model": "string (e.g. SM-A307FN)",
+  "os_version": "string (e.g. Android 11 / API 30)",
   "app_version": "string (semver)",
   "capabilities": {
     "arcore_available": false,
@@ -73,14 +73,14 @@ Toplam: 12 byte başlık + `payload_length` byte payload.
 }
 ```
 
-**`0x02 HELLO_ACK`** (server→client) — `HELLO`'ya yanıt.
+**`0x02 HELLO_ACK`** (server→client) — response to `HELLO`.
 
 ```json
 {
   "accepted": true,
   "session_id": "uuid",
   "server_time_ns": 1234567890123456789,
-  "reason": "string (yalnız accepted=false ise)",
+  "reason": "string (only if accepted=false)",
   "negotiated": {
     "video": { "codec": "h264", "width": 1280, "height": 720, "fps": 30, "bitrate_kbps": 4000 },
     "imu": true,
@@ -90,95 +90,95 @@ Toplam: 12 byte başlık + `payload_length` byte payload.
   }
 }
 ```
-`negotiated`, istemcinin teklifiyle sunucunun kabul ettiğinin **AND**'idir — sunucu bir alanı istemiyorsa `false`/küçültülmüş değer döner, istemci ona uymalıdır.
+`negotiated` is the **AND** of what the client offered and what the server accepted — if the server doesn't want a field, it returns `false`/a reduced value, and the client must comply.
 
-### 3.2 Saat senkronizasyonu
+### 3.2 Clock synchronization
 
-**`0x03 CLOCK_SYNC_REQUEST`** (client→server): `int64 client_send_time_ns` (8 byte payload).
+**`0x03 CLOCK_SYNC_REQUEST`** (client→server): `int64 client_send_time_ns` (8-byte payload).
 
-**`0x04 CLOCK_SYNC_RESPONSE`** (server→client): `int64 client_send_time_ns, int64 server_recv_time_ns, int64 server_send_time_ns` (24 byte payload).
+**`0x04 CLOCK_SYNC_RESPONSE`** (server→client): `int64 client_send_time_ns, int64 server_recv_time_ns, int64 server_send_time_ns` (24-byte payload).
 
-İstemci ofseti şöyle hesaplar:
+The client computes the offset as:
 ```
 offset = ((server_recv_time_ns - client_send_time_ns) + (server_send_time_ns - client_recv_time_ns)) / 2
 ```
-Bu ofset yalnız **mutlak** zaman hizalaması/loglama içindir — `VIDEO_CHUNK`/`IMU_BATCH` içindeki zaman damgaları HAM cihaz saatidir, bu ofsetle düzeltilmez (göreli delta hesapları bozulmasın diye).
+This offset is only for **absolute** time alignment/logging — timestamps inside `VIDEO_CHUNK`/`IMU_BATCH` are the RAW device clock and are never corrected with this offset (so relative delta calculations stay intact).
 
 ### 3.3 Video
 
-**`0x05 VIDEO_CONFIG`** (client→server) — `HELLO_ACK` sonrası bir kez, ve her reconnect'te veya orta-akış yeniden yapılandırmada tekrar gönderilir.
+**`0x05 VIDEO_CONFIG`** (client→server) — sent once after `HELLO_ACK`, and resent on every reconnect or mid-stream reconfiguration.
 
-Payload: `uint16 json_len` + UTF-8 JSON (`codec, profile, width, height, fps, bitrate_kbps, rotation`) + ham SPS/PPS NAL byte'ları (Annex-B, start-code dahil).
+Payload: `uint16 json_len` + UTF-8 JSON (`codec, profile, width, height, fps, bitrate_kbps, rotation`) + raw SPS/PPS NAL bytes (Annex-B, including start code).
 
-`rotation` (int, derece — 0/90/180/270): kamera sensörünün `ACAMERA_SENSOR_ORIENTATION` değeri. Kare verisinin **kendisi** hiç döndürülmez (encoder'ın sıfır-kopya, Surface-girişli hattı bozulmasın diye) — bu yalnız metadata, alıcı taraf kareyi göstermeden önce bu kadar saat yönünde döndürmeli. Standart video konteynerlerinin (MP4 "rotation matrix" vb.) çözdüğü sorunun aynısı, aynı yöntemle: piksel değil metadata döner.
+`rotation` (int, degrees — 0/90/180/270): the camera sensor's `ACAMERA_SENSOR_ORIENTATION` value. The frame data **itself** is never rotated (so the encoder's zero-copy, Surface-input path stays intact) — this is metadata only; the receiving side must rotate the frame clockwise by this amount before displaying it. Same problem standard video containers solve (MP4 "rotation matrix" etc.), same method: metadata, not pixels, gets rotated.
 
-**`0x10 VIDEO_CHUNK`** (client→server) — her video karesi için bir tane.
+**`0x10 VIDEO_CHUNK`** (client→server) — one per video frame.
 
-Payload: `int64 capture_timestamp_ns` (8) + `uint8 flags` (1, bit0=keyframe) + kalan tüm byte'lar Annex-B start-code delimited H.264 NAL birimi.
+Payload: `int64 capture_timestamp_ns` (8) + `uint8 flags` (1, bit0=keyframe) + all remaining bytes are an Annex-B start-code-delimited H.264 NAL unit.
 
-Keyframe aralığı varsayılan **2 saniye** (~60 kare @ 30fps), `VIDEO_CONFIG`'de negotiable.
+Default keyframe interval is **2 seconds** (~60 frames @ 30fps), negotiable in `VIDEO_CONFIG`.
 
 ### 3.4 IMU
 
-**`0x20 IMU_BATCH`** (client→server) — ~50–100ms'de bir gruplu gönderilir (kare-başına DEĞİL).
+**`0x20 IMU_BATCH`** (client→server) — sent batched every ~50–100ms (NOT per frame).
 
-Payload: `uint16 sample_count` + `sample_count` kere tekrarlanan:
-| Alan | Tip |
+Payload: `uint16 sample_count` + `sample_count` repetitions of:
+| Field | Type |
 |---|---|
 | `sensor_type` | `uint8` (`0`=accelerometer, `1`=gyroscope) |
 | `timestamp_ns` | `int64` |
 | `x, y, z` | `float32` × 3 |
 
-### 3.5 ARCore opsiyonel alanlar
+### 3.5 Optional ARCore fields
 
-**`0x30 POSE_SAMPLE`** (client→server, opsiyonel): `int64 timestamp_ns, uint8 tracking_state, float32 x,y,z, float32 qx,qy,qz,qw` (37 byte).
+**`0x30 POSE_SAMPLE`** (client→server, optional): `int64 timestamp_ns, uint8 tracking_state, float32 x,y,z, float32 qx,qy,qz,qw` (37 bytes).
 
-**`0x31 POINT_CLOUD`** (client→server, opsiyonel): `int64 timestamp_ns, uint32 point_count` + `point_count` kere `float32 x,y,z,confidence` (16 byte/nokta).
+**`0x31 POINT_CLOUD`** (client→server, optional): `int64 timestamp_ns, uint32 point_count` + `point_count` repetitions of `float32 x,y,z,confidence` (16 bytes/point).
 
-**`0x32 CAMERA_INTRINSICS`** (client→server, opsiyonel, bir kez veya değiştiğinde): `float32 fx,fy,cx,cy, uint32 width,height` (24 byte).
+**`0x32 CAMERA_INTRINSICS`** (client→server, optional, once or on change): `float32 fx,fy,cx,cy, uint32 width,height` (24 bytes).
 
-### 3.6 Kontrol
+### 3.6 Control
 
-**`0x40 STATUS`** (çift yön): JSON `{"level": "info|warn|error", "code": "string", "message": "string"}` — örn. sunucu bitrate düşürmeyi isteyebilir.
+**`0x40 STATUS`** (bidirectional): JSON `{"level": "info|warn|error", "code": "string", "message": "string"}` — e.g. the server may ask to lower the bitrate.
 
-**`0xF0 GOODBYE`** (çift yön): JSON `{"reason": "string"}` — bağlantıyı düzgün kapatmadan önce.
+**`0xF0 GOODBYE`** (bidirectional): JSON `{"reason": "string"}` — sent before gracefully closing the connection.
 
 ---
 
-## 4. Bağlantı yaşam döngüsü
+## 4. Connection lifecycle
 
 ```
-istemci bağlanır (TCP connect)
-  → HELLO gönderir
-  ← HELLO_ACK bekler (accepted=false ise bağlantı kapanır)
-  → CLOCK_SYNC_REQUEST / ← CLOCK_SYNC_RESPONSE (opsiyonel ama önerilir, bağlantı başına 1 kez yeterli)
-  → VIDEO_CONFIG gönderir
-  → (döngü) VIDEO_CHUNK, IMU_BATCH, [POSE_SAMPLE, POINT_CLOUD, CAMERA_INTRINSICS]
-  → GOODBYE (düzgün kapanışta) veya bağlantı kopar (istemci reconnect dener, HELLO'dan başlar)
+client connects (TCP connect)
+  → sends HELLO
+  ← waits for HELLO_ACK (connection closes if accepted=false)
+  → CLOCK_SYNC_REQUEST / ← CLOCK_SYNC_RESPONSE (optional but recommended, once per connection is enough)
+  → sends VIDEO_CONFIG
+  → (loop) VIDEO_CHUNK, IMU_BATCH, [POSE_SAMPLE, POINT_CLOUD, CAMERA_INTRINSICS]
+  → GOODBYE (on graceful close) or the connection drops (client retries, restarting from HELLO)
 ```
 
 ---
 
-## 5. Versiyonlama
+## 5. Versioning
 
-`protocol_version` her başlıkta taşınır. Aynı major sürüm = tel-uyumlu. Bilinmeyen `msg_type`'lar §2'deki kuralla güvenle atlanabildiğinden, aynı-major bir istemci/sunucu çifti yeni mesaj tipleri eklense bile birbirini kilitlemez.
+`protocol_version` is carried in every header. Same major version = wire-compatible. Since unknown `msg_type`s can be safely skipped by the rule in §2, a client/server pair on the same major version won't deadlock each other even as new message types get added.
 
-**Planlanan v2 (henüz yok, `docs/ROADMAP.md`):** UDP taşıma + hafif/hızlı bir şifreleme şeması (tam TLS değil — düşük gecikmeli bir el sıkışma + AEAD, örn. ChaCha20-Poly1305; QUIC de bu ikisini bir arada çözen bir alternatif) — yalnız *taşımayı* değiştirir, yukarıdaki mesaj sözlüğünü/semantiğini değiştirmez. `sequence_number` alanı zaten bunun için ayrıldı.
-
----
-
-## 6. Güvenlik — bilinçli v1 sınırı
-
-v1'de TLS yok, kimlik doğrulama yok. Varsayım: istemci ve sunucu güvenilir bir ağda (aynı LAN, veya VPN/tünel arkasında). İnternet üzerinden kullanım gerekiyorsa v1 için önerilen yol protokole özel kripto eklemek değil, **WireGuard/Tailscale/SSH port-forward gibi bir tünel** kurmaktır — bu, "sade" tasarım tercihiyle ve ağ topolojisinin dağıtım katmanında çözülmesi gerektiği kararıyla tutarlıdır. v2'de (bkz. §5) bu sınır UDP taşımasıyla birlikte hafif bir şifreleme katmanıyla ele alınması planlanıyor — tasarımı henüz yapılmadı.
+**Planned v2 (not yet built, `docs/ROADMAP.md`):** UDP transport + a lightweight/fast encryption scheme (not full TLS — a low-latency handshake + AEAD, e.g. ChaCha20-Poly1305; QUIC is also a candidate that solves both at once) — this only changes the *transport*, not the message vocabulary/semantics above. The `sequence_number` field is already reserved for this.
 
 ---
 
-## 7. Örnek byte dizileri (golden fixtures)
+## 6. Security — a deliberate v1 boundary
 
-`protocol_writer_test.cpp` ve `server/tests/test_protocol.py`'nin ikisi de bu bölümdeki (veya `fixtures/` altındaki) hex-encoded örnek mesajlara karşı test edilir, böylece iki bağımsız implementasyon sessizce ayrışamaz. M4'te doldurulacak.
+v1 has no TLS, no authentication. Assumption: client and server are on a trusted network (same LAN, or behind a VPN/tunnel). If internet-facing use is needed, the recommended path for v1 is not to bolt protocol-specific crypto on top, but to set up **a tunnel like WireGuard/Tailscale/SSH port-forwarding** — consistent with the "keep it simple" design choice and the decision that network topology should be solved at the deployment layer. In v2 (see §5) this boundary is planned to be addressed alongside UDP transport with a lightweight encryption layer — not yet designed.
 
 ---
 
-## 8. Değişiklik günlüğü
+## 7. Example byte sequences (golden fixtures)
 
-- **v1.0** — ilk sürüm. Mesaj tipleri 0x01–0x05, 0x10, 0x20, 0x30–0x32, 0x40, 0xF0.
+Both `protocol_writer_test.cpp` and `server/tests/test_protocol.py` are tested against the hex-encoded example messages in this section (or under `fixtures/`), so the two independent implementations can't silently drift apart. Filled in at M4.
+
+---
+
+## 8. Changelog
+
+- **v1.0** — initial release. Message types 0x01–0x05, 0x10, 0x20, 0x30–0x32, 0x40, 0xF0.

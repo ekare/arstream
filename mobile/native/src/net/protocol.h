@@ -1,19 +1,20 @@
 #pragma once
 
-// arstream kablo protokolu v1 -- docs/PROTOCOL.md'nin birebir C++ yansimasi.
+// arstream wire protocol v1 -- a faithful C++ mirror of docs/PROTOCOL.md.
 //
-// KASITLI OLARAK GODOT-CPP'YE BAGIMLI DEGIL: bu dosya hem GDExtension'in
-// icinde (Android/Windows) hem de bagimsiz bir host test executable'inda
-// (mobile/native/tests/) derlenir -- SCons/godot-cpp gerekmeden, cihaz/
-// emulator gerekmeden calisir. Yalniz stdlib.
+// DELIBERATELY HAS NO GODOT-CPP DEPENDENCY: this file is compiled both
+// inside the GDExtension (Android/Windows) and in a standalone host test
+// executable (mobile/native/tests/) -- it builds without SCons/godot-cpp,
+// without a device/emulator. stdlib only.
 //
-// Kapsam notu: JSON govdeli mesajlarda (HELLO, VIDEO_CONFIG'in json kismi,
-// STATUS, GOODBYE) JSON'un kendisi burada uretilmiyor/ayristirilmiyor --
-// cagiran taraf hazir bir JSON string'i verir/alir. C++'ta bagimliliksiz bir
-// JSON kutuphanesi olmadigi icin bu bilincli bir sinir; server/protocol.py
-// tarafinda (Python stdlib json ile) tam encode/decode var. Burada test
-// edilen sey kablo CERCEVELEMESI (header + payload sinirlari) -- protokolun
-// asil "iki bagimsiz implementasyon ayrisir mi" riski budur.
+// Scope note: for JSON-bodied messages (HELLO, VIDEO_CONFIG's json part,
+// STATUS, GOODBYE), the JSON itself is not produced/parsed here -- the
+// caller supplies/receives an already-built JSON string. This is a
+// deliberate boundary since there's no dependency-free JSON library in
+// C++; the server/protocol.py side does full encode/decode (using Python's
+// stdlib json). What's tested here is the wire FRAMING (header + payload
+// boundaries) -- that's the protocol's actual "do the two independent
+// implementations drift apart" risk.
 
 #include <cstdint>
 #include <cstddef>
@@ -58,7 +59,7 @@ struct Point {
 	float x = 0, y = 0, z = 0, confidence = 0;
 };
 
-// -- Encode: header + tam mesaj govdesi birlikte, gonderilmeye hazir byte'lar --
+// -- Encode: header + full message body together, ready-to-send bytes --
 
 std::vector<uint8_t> encode_header(const Header &h);
 
@@ -77,13 +78,13 @@ std::vector<uint8_t> encode_goodbye(uint32_t seq, const std::string &json_body);
 
 // -- Decode --
 
-// Header'i cozer. false donerse `size` 12 byte'tan az demektir.
+// Decodes the header. Returns false if `size` is less than 12 bytes.
 bool decode_header(const uint8_t *data, size_t size, Header &out);
 
-// Bilinmeyen msg_type'lari da guvenle atlayarak bir sonraki mesaja gecmek
-// icin: header'i okur, payload'a isaretci+uzunluk doner, toplam tuketilen
-// byte sayisini yazar. `buffer` icinde tam bir mesaj yoksa false doner
-// (cagiran taraf daha fazla byte gelene kadar beklemeli).
+// For safely skipping unknown msg_types and moving on to the next message:
+// reads the header, returns a pointer+length to the payload, and writes the
+// total number of bytes consumed. Returns false if `buffer` doesn't contain
+// a complete message yet (the caller should wait for more bytes).
 struct MessageView {
 	Header header;
 	const uint8_t *payload = nullptr;
@@ -91,8 +92,8 @@ struct MessageView {
 };
 bool next_message(const uint8_t *buffer, size_t size, MessageView &out, size_t &bytes_consumed);
 
-// Sabit-duzenli govdeler icin dogrudan cozucu -- payload, next_message()'in
-// dondurdugu MessageView.payload/payload_size ile cagrilir.
+// Direct decoders for fixed-layout bodies -- called with the payload
+// pointer/size returned by next_message()'s MessageView.
 bool decode_clock_sync_request(const uint8_t *payload, size_t size, int64_t &out_client_send_time_ns);
 bool decode_clock_sync_response(const uint8_t *payload, size_t size, int64_t &out_client_send_time_ns, int64_t &out_server_recv_time_ns, int64_t &out_server_send_time_ns);
 bool decode_imu_batch(const uint8_t *payload, size_t size, std::vector<ImuSample> &out_samples);

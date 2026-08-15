@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Golden-byte fixture uretici -- docs/PROTOCOL.md'nin bayt duzenini
-DOGRUDAN struct.pack ile, ne protocol.py'yi ne protocol.cpp'yi cagirarak
-uretir. Boylece iki implementasyonun ikisi de bu dosyalara karsi test edilir
--- biri digerinin "referansi" degildir.
+"""Golden-byte fixture generator -- produces docs/PROTOCOL.md's byte layout
+DIRECTLY with struct.pack, without calling either protocol.py or
+protocol.cpp. This way both implementations get tested against these files
+-- neither is the other's "reference".
 
-Calistir: python fixtures/generate_fixtures.py
+Run: python fixtures/generate_fixtures.py
 """
 
 import struct
@@ -19,7 +19,7 @@ def header(payload_len: int, msg_type: int, seq: int, flags: int = 0, version: i
 
 def write(name: str, data: bytes) -> None:
     (OUT / name).write_bytes(data)
-    print(f"{name}: {len(data)} byte")
+    print(f"{name}: {len(data)} bytes")
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
     payload = struct.pack(">qqq", 1000, 1050, 1060)
     write("clock_sync_response.bin", header(len(payload), 0x04, 2) + payload)
 
-    # imu_batch: seq=3, iki ornek: (accel, t=100, 1.5,-2.5,9.8), (gyro, t=200, 0.1,0.2,0.3)
+    # imu_batch: seq=3, two samples: (accel, t=100, 1.5,-2.5,9.8), (gyro, t=200, 0.1,0.2,0.3)
     payload = struct.pack(">H", 2)
     payload += struct.pack(">Bqfff", 0, 100, 1.5, -2.5, 9.8)
     payload += struct.pack(">Bqfff", 1, 200, 0.1, 0.2, 0.3)
@@ -45,7 +45,7 @@ def main() -> None:
     payload = struct.pack(">ffffII", 600.5, 601.5, 320.0, 240.0, 640, 480)
     write("camera_intrinsics.bin", header(len(payload), 0x32, 5) + payload)
 
-    # point_cloud: seq=6, t=7000, iki nokta
+    # point_cloud: seq=6, t=7000, two points
     payload = struct.pack(">qI", 7000, 2)
     payload += struct.pack(">ffff", 1.0, 2.0, 3.0, 0.9)
     payload += struct.pack(">ffff", 4.0, 5.0, 6.0, 0.8)

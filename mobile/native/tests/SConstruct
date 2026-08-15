@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-# protocol_test icin bagimsiz host-derleme betigi -- godot-cpp'ye HIC girmez,
-# CI'da cihaz/emulator/Android SDK gerekmeden calisir (bkz. docs/ROADMAP.md M7).
+# Standalone host-build script for protocol_test -- has NO dependency on
+# godot-cpp, runs in CI without a device/emulator/Android SDK (see docs/ROADMAP.md M7).
 #
-# Calistir: cd mobile/native/tests && scons
+# Run: cd mobile/native/tests && scons
 
 env = Environment()
 if env["PLATFORM"] == "win32":

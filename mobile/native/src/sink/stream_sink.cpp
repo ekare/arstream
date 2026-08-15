@@ -21,23 +21,23 @@ StreamSink::~StreamSink() {
 bool StreamSink::open(const std::string &destination, std::string &out_error) {
 	size_t colon = destination.find_last_of(':');
 	if (colon == std::string::npos || colon == 0 || colon == destination.size() - 1) {
-		out_error = "Gecersiz stream hedefi (\"host:port\" bekleniyor): " + destination;
+		out_error = "Invalid stream destination (expected \"host:port\"): " + destination;
 		return false;
 	}
 	host_ = destination.substr(0, colon);
-	// std::stoi degil -- Godot/Android derlemesinde istisnalar kapali.
+	// Not std::stoi -- exceptions are disabled in the Godot/Android build.
 	std::string port_str = destination.substr(colon + 1);
 	char *end = nullptr;
 	long port_val = std::strtol(port_str.c_str(), &end, 10);
 	if (end == port_str.c_str() || *end != '\0' || port_val <= 0 || port_val > 65535) {
-		out_error = "Gecersiz port: " + destination;
+		out_error = "Invalid port: " + destination;
 		return false;
 	}
 	port_ = static_cast<uint16_t>(port_val);
 
-	// Onceki oturumdan kalmis olabilecek spool dosyasini temizle -- bu
-	// oturumun tasma gecmisi bastan baslar (capture'lar arasi kalicilik
-	// hedeflenmiyor, bkz. docs/ROADMAP.md).
+	// Clear any spool file left over from a previous session -- this
+	// session's overflow history starts fresh (no persistence across
+	// captures is intended, see docs/ROADMAP.md).
 	std::remove(spool_path_.c_str());
 	overflowing_ = false;
 	memory_bytes_ = 0;
@@ -49,20 +49,21 @@ bool StreamSink::open(const std::string &destination, std::string &out_error) {
 
 	running_ = true;
 	sender_thread_ = std::thread(&StreamSink::sender_loop, this);
-	// Baglanti async kurulur -- sunucu su an ayakta olmasa bile open() basarili
-	// doner, veri kuyrukta birikir (bkz. sinif basi aciklamasi).
+	// The connection is established asynchronously -- open() returns
+	// success even if the server isn't up right now, data just piles up in
+	// the queue (see the class-level comment).
 	return true;
 }
 
 void StreamSink::write_video_config(const uint8_t *sps_pps_annexb, size_t size, int32_t rotation_degrees) {
 	std::vector<uint8_t> sps_pps(sps_pps_annexb, sps_pps_annexb + size);
-	// TODO(M5+): gercek codec/genislik/yukseklik/fps burada ArCapture'dan
-	// gelmeli. rotation, ACAMERA_SENSOR_ORIENTATION'dan geliyor (bkz.
-	// output_sink.h notu) -- alici kareyi bu kadar saat yonunde dondurmeli.
+	// TODO(M5+): the real codec/width/height/fps should come from ArCapture
+	// here. rotation comes from ACAMERA_SENSOR_ORIENTATION (see the note in
+	// output_sink.h) -- the receiver must rotate the frame clockwise by this amount.
 	std::string json = "{\"codec\":\"h264\",\"rotation\":" + std::to_string(rotation_degrees) + "}";
 	auto message = protocol::encode_video_config(video_config_seq_++, json, sps_pps);
-	// FIFO kuyruguna girmiyor -- sender_loop her (yeniden) baglantida bunu
-	// en basta ayrica gonderir (bkz. header'daki not).
+	// Doesn't enter the FIFO queue -- sender_loop sends this separately, at
+	// the start of every (re)connection (see the note in the header).
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		cached_video_config_ = std::move(message);
@@ -80,8 +81,8 @@ void StreamSink::enqueue(std::vector<uint8_t> message) {
 		memory_bytes_ += message.size();
 		memory_queue_.push_back(std::move(message));
 	} else {
-		// Bellek dolu (ya da zaten tasma modundayiz) -- sirayi bozmamak icin
-		// yeni veri de diske gider, kuyruk tamamen bosalana kadar.
+		// Memory is full (or we're already in overflow mode) -- to avoid
+		// breaking ordering, new data also goes to disk, until the queue drains completely.
 		overflowing_ = true;
 		if (spool_write_file_ == nullptr) {
 			spool_write_file_ = fopen(spool_path_.c_str(), "wb");
@@ -116,7 +117,7 @@ bool StreamSink::pop_next_to_send(std::vector<uint8_t> &out) {
 	if (overflowing_ && spool_read_file_ != nullptr && spool_read_pos_ < spool_write_pos_) {
 		uint8_t header_buf[protocol::kHeaderSize];
 		if (fread(header_buf, 1, protocol::kHeaderSize, spool_read_file_) != protocol::kHeaderSize) {
-			return false; // yazan taraf henuz tamamlamamis olabilir, sonra tekrar denenir
+			return false; // the writer side may not be done yet, will be retried later
 		}
 		protocol::Header h;
 		if (!protocol::decode_header(header_buf, protocol::kHeaderSize, h)) {
@@ -158,26 +159,26 @@ void StreamSink::sender_loop() {
 	StreamClient client;
 	int backoff_ms = 500;
 	constexpr int kMaxBackoffMs = 8000;
-	// Bu BAGLANTIYA video config gonderildi mi? Her yeni baglantida false'a
-	// doner. Encoder'in ilk SPS/PPS'i baglanmadan SONRA gelmis olabilir --
-	// bu yuzden tek seferlik "connect anindaki cache" yeterli degil, her
-	// tur kontrol edilir (bkz. asagisi).
+	// Has video config been sent to THIS connection? Resets to false on
+	// every new connection. The encoder's first SPS/PPS may arrive AFTER
+	// connecting -- so a one-time "cache at connect time" isn't enough, this
+	// is checked every loop iteration (see below).
 	bool config_sent_to_current_connection = false;
 
 	while (true) {
 		bool shutting_down = !running_;
 		if (shutting_down) {
 			if (!has_queued_data()) {
-				break; // her sey gonderildi
+				break; // everything has been sent
 			}
 			if (std::chrono::steady_clock::now() >= shutdown_deadline_) {
-				break; // sure doldu -- elden gelen bu kadar, kalan kabul edilen kayip
+				break; // time's up -- this is as far as we can go, the rest is accepted as lost
 			}
 		}
 
 		if (!client.is_connected()) {
 			if (shutting_down) {
-				break; // kapaniyoruz ve bagli degiliz -- elden gelen kalmadi
+				break; // shutting down and not connected -- nothing more to do
 			}
 			std::string err;
 			if (client.connect_to(host_, port_, /*timeout_ms=*/3000, err)) {
@@ -192,10 +193,10 @@ void StreamSink::sender_loop() {
 			}
 		}
 
-		// docs/PROTOCOL.md: VIDEO_CONFIG her (yeniden) baglantida en basta
-		// gonderilir. Encoder'in SPS/PPS'i baglanti anindan sonra gelmis
-		// olabilir (yarisi durumu) -- bu yuzden her turda tekrar kontrol
-		// edilir, yalniz "connect basarili oldu" anina bagli kalinmaz.
+		// docs/PROTOCOL.md: VIDEO_CONFIG is sent first on every
+		// (re)connection. The encoder's SPS/PPS may arrive after the moment
+		// of connecting (a race) -- so this is re-checked every iteration,
+		// not just tied to the "connect just succeeded" moment.
 		if (!config_sent_to_current_connection) {
 			std::vector<uint8_t> config_copy;
 			{
@@ -215,8 +216,8 @@ void StreamSink::sender_loop() {
 		std::vector<uint8_t> message;
 		if (pop_next_to_send(message)) {
 			if (!client.send_all(message.data(), message.size())) {
-				// Baglanti koptu -- mesaji GERI kuyruga koy (kayip olmasin),
-				// yeniden baglanmayi dene.
+				// Connection dropped -- put the message BACK at the front of
+				// the queue (so it isn't lost), retry connecting.
 				connected_ = false;
 				client.disconnect();
 				requeue_front(std::move(message));

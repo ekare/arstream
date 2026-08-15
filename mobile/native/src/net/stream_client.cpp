@@ -1,12 +1,12 @@
 #include "stream_client.h"
 
-// Bu dosya TUM platformlar icin derleme listesine dahil (bkz. SConstruct
-// sink/net glob'lari), cunku editorun kendi platformunda (Windows) da
-// GDExtension'in yuklenebilmesi gerekiyor (bkz. docs/ARCHITECTURE.md M1
-// notu). Gercek POSIX soket kodu Android VE iOS'ta derlenir (ikisi de ayni
-// BSD sockets API'sini kullanir, bkz. docs/IOS_HANDOVER.md) -- digerlerinde
-// (Windows/macOS editor) derlenebilir ama calismasi beklenmeyen bir govde
-// birakilir.
+// This file is included in the build for ALL platforms (see the sink/net
+// globs in SConstruct), because the GDExtension also needs to load on the
+// editor's own platform (Windows) (see the M1 note in
+// docs/ARCHITECTURE.md). The real POSIX socket code is compiled on both
+// Android AND iOS (both use the same BSD sockets API, see
+// docs/IOS_HANDOVER.md) -- on the others (Windows/macOS editor) it compiles
+// but a body that isn't expected to actually run is left in place.
 #if defined(ANDROID_ENABLED) || defined(IOS_ENABLED)
 
 #include <arpa/inet.h>
@@ -37,7 +37,7 @@ bool StreamClient::connect_to(const std::string &host, uint16_t port, int timeou
 	std::string port_str = std::to_string(port);
 	int gai_err = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &result);
 	if (gai_err != 0 || result == nullptr) {
-		out_error = "Adres cozulemedi: " + host + " (" + gai_strerror(gai_err) + ")";
+		out_error = "Could not resolve address: " + host + " (" + gai_strerror(gai_err) + ")";
 		return false;
 	}
 
@@ -49,8 +49,8 @@ bool StreamClient::connect_to(const std::string &host, uint16_t port, int timeou
 			continue;
 		}
 
-		// Non-blocking connect + select ile timeout -- olu/erisilemez bir
-		// sunucu sender thread'ini sinirsiz kilitlemesin.
+		// Non-blocking connect + select for the timeout -- so a dead/
+		// unreachable server can't block the sender thread indefinitely.
 		int flags = fcntl(fd, F_GETFL, 0);
 		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
@@ -73,7 +73,7 @@ bool StreamClient::connect_to(const std::string &host, uint16_t port, int timeou
 			}
 		}
 
-		fcntl(fd, F_SETFL, flags); // blocking moda geri don
+		fcntl(fd, F_SETFL, flags); // back to blocking mode
 
 		if (connected) {
 			break;
@@ -84,7 +84,7 @@ bool StreamClient::connect_to(const std::string &host, uint16_t port, int timeou
 	freeaddrinfo(result);
 
 	if (!connected) {
-		out_error = "Baglanilamadi: " + host + ":" + port_str;
+		out_error = "Could not connect: " + host + ":" + port_str;
 		return false;
 	}
 
@@ -122,7 +122,7 @@ void StreamClient::disconnect() {
 
 } // namespace arstream
 
-#else // ne ANDROID_ENABLED ne IOS_ENABLED -- editor platformunda (Windows vb.) derlenir ama kullanilmaz.
+#else // neither ANDROID_ENABLED nor IOS_ENABLED -- compiles on the editor platform (Windows etc.) but is never used.
 
 namespace arstream {
 
@@ -132,7 +132,7 @@ bool StreamClient::connect_to(const std::string &host, uint16_t port, int timeou
 	(void)host;
 	(void)port;
 	(void)timeout_ms;
-	out_error = "StreamClient yalniz Android'de destekleniyor.";
+	out_error = "StreamClient is only supported on Android.";
 	return false;
 }
 

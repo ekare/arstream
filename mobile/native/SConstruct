@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # arcapture GDExtension build script.
-# Godot 4.6.x'e karsi derlenir (mobile/thirdparty/godot-cpp/gdextension/extension_api-4-6.json).
+# Builds against Godot 4.6.x (mobile/thirdparty/godot-cpp/gdextension/extension_api-4-6.json).
 
 env = SConscript("../thirdparty/godot-cpp/SConstruct", {"api_version": "4.6"})
 
@@ -9,11 +9,11 @@ sources = Glob("src/*.cpp")
 sources += Glob("src/sink/*.cpp")
 sources += Glob("src/net/*.cpp")
 
-# Platforma-ozel kaynaklar yalnizca ilgili platform hedeflenirken derlemeye dahil edilir.
+# Platform-specific sources are only added to the build when that platform is targeted.
 if env["platform"] == "android":
     sources += Glob("src/capture/android/*.cpp")
     sources += Glob("src/encode/*android*.cpp")
-    # NDK Camera2 + Media (AMediaCodec) -- saf C API'ler, Kotlin/JNI gerekmez.
+    # NDK Camera2 + Media (AMediaCodec) -- pure C APIs, no Kotlin/JNI needed.
     env.Append(LIBS=["camera2ndk", "mediandk", "android"])
 elif env["platform"] == "ios":
     sources += Glob("src/capture/ios/*.mm")

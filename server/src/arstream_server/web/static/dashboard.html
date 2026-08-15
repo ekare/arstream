@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>arstream dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #16161a; --card: #1e1e24; --border: #2c2c34;
+    --text: #e8e8ec; --text-muted: #8a8a94;
+    --live: #2ecc71; --ended: #5a5a66; --accent: #4a9eff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
+  .sub .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ended); margin-right: 6px; vertical-align: middle; }
+  .sub .dot.connected { background: var(--live); }
+  h2 { font-size: 14px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 28px 0 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--text-muted); font-weight: 500; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 8px; border-radius: 100px; }
+  .badge.live { background: rgba(46,204,113,0.15); color: var(--live); }
+  .badge.ended { background: rgba(90,90,102,0.25); color: var(--text-muted); }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+  .empty { padding: 20px 12px; color: var(--text-muted); font-size: 13px; }
+  a.dl { color: var(--accent); text-decoration: none; font-size: 13px; }
+  a.dl:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <h1>arstream dashboard</h1>
+  <p class="sub"><span id="ws-dot" class="dot"></span><span id="ws-status">connecting…</span></p>
+
+  <h2>Live sessions</h2>
+  <div class="card"><table id="live-table">
+    <thead><tr><th>client</th><th>frames</th><th>fps</th><th>keyframes</th><th>data</th><th>started</th></tr></thead>
+    <tbody id="live-body"><tr><td class="empty" colspan="6">no live sessions yet</td></tr></tbody>
+  </table></div>
+
+  <h2>Past sessions</h2>
+  <div class="card"><table id="past-table">
+    <thead><tr><th>client</th><th>frames</th><th>keyframes</th><th>data</th><th>duration</th><th></th></tr></thead>
+    <tbody id="past-body"><tr><td class="empty" colspan="6">no recordings yet</td></tr></tbody>
+  </table></div>
+
+<script>
+const liveSessions = new Map();
+const pastSessions = new Map();
+
+function fmtBytes(n) {
+  if (n > 1024*1024) return (n/1024/1024).toFixed(1) + " MB";
+  return (n/1024).toFixed(1) + " KB";
+}
+function fmtTime(unixSeconds) {
+  return new Date(unixSeconds * 1000).toLocaleTimeString();
+}
+function fmtDuration(startSec, endSec) {
+  const s = Math.max(0, endSec - startSec);
+  return s < 60 ? `${s.toFixed(0)}s` : `${(s/60).toFixed(1)}min`;
+}
+
+function render() {
+  const liveBody = document.getElementById("live-body");
+  const pastBody = document.getElementById("past-body");
+
+  if (liveSessions.size === 0) {
+    liveBody.innerHTML = `<tr><td class="empty" colspan="6">no live sessions yet</td></tr>`;
+  } else {
+    liveBody.innerHTML = [...liveSessions.values()].map(s => `
+      <tr>
+        <td>${s.peer_address}<br><span class="mono">${s.id.slice(0,8)}</span></td>
+        <td>${s.frame_count}</td>
+        <td>${s.fps.toFixed(1)}</td>
+        <td>${s.keyframe_count}</td>
+        <td>${fmtBytes(s.byte_count)}</td>
+        <td>${fmtTime(s.started_at)}</td>
+      </tr>`).join("");
+  }
+
+  if (pastSessions.size === 0) {
+    pastBody.innerHTML = `<tr><td class="empty" colspan="6">no recordings yet</td></tr>`;
+  } else {
+    const rows = [...pastSessions.values()].sort((a,b) => b.started_at - a.started_at);
+    pastBody.innerHTML = rows.map(s => `
+      <tr>
+        <td>${s.peer_address}<br><span class="mono">${s.id.slice(0,8)}</span></td>
+        <td>${s.frame_count}</td>
+        <td>${s.keyframe_count}</td>
+        <td>${fmtBytes(s.byte_count)}</td>
+        <td>${s.ended_at ? fmtDuration(s.started_at, s.ended_at) : "—"}</td>
+        <td><a class="dl" href="/api/sessions/${s.id}/download">download (.zip)</a></td>
+      </tr>`).join("");
+  }
+}
+
+function upsert(session) {
+  if (session.is_live) {
+    liveSessions.set(session.id, session);
+    pastSessions.delete(session.id);
+  } else {
+    liveSessions.delete(session.id);
+    pastSessions.set(session.id, session);
+  }
+  render();
+}
+
+async function loadInitial() {
+  const res = await fetch("/api/sessions");
+  const data = await res.json();
+  for (const s of data.sessions) upsert(s);
+}
+
+function connectWs() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+  const dot = document.getElementById("ws-dot");
+  const status = document.getElementById("ws-status");
+
+  ws.onopen = () => { dot.classList.add("connected"); status.textContent = "live connection established"; };
+  ws.onclose = () => { dot.classList.remove("connected"); status.textContent = "connection lost, retrying…"; setTimeout(connectWs, 2000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    const event = JSON.parse(ev.data);
+    if (event.session) upsert(event.session);
+  };
+}
+
+loadInitial().then(connectWs);
+</script>
+</body>
+</html>

@@ -5,27 +5,28 @@
 
 namespace arstream {
 
-// Encode edilmis Annex-B H.264 verisinin gidecegi yer. "save" ve "stream"
-// modlari bu arayuzun iki implementasyonu -- ArCapture hangisini kullanacagini
-// config'teki "mode" alanina gore secer.
+// Where encoded Annex-B H.264 data goes. "save" and "stream" modes are two
+// implementations of this interface -- ArCapture picks which one to use
+// based on the "mode" field in the config.
 class OutputSink {
 public:
 	virtual ~OutputSink() = default;
 
-	// destination: save modunda dosya yolu; stream modunda "host:port".
+	// destination: a file path in save mode; "host:port" in stream mode.
 	virtual bool open(const std::string &destination, std::string &out_error) = 0;
 
-	// Encoder'in SPS/PPS (AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) ciktisi --
-	// write_chunk()'tan AYRI, cunku protokolde kendi mesaj tipi var
-	// (VIDEO_CONFIG, 0x05) ve normal karelerle karistirilmamali.
+	// The encoder's SPS/PPS (AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) output --
+	// kept SEPARATE from write_chunk() because it has its own message type
+	// in the protocol (VIDEO_CONFIG, 0x05) and must not be mixed in with
+	// regular frames.
 	//
-	// rotation_degrees: kamera sensorunun ACAMERA_SENSOR_ORIENTATION degeri
-	// (0/90/180/270, saat yonunde) -- kare verisinin KENDISI hic
-	// dondurulmuyor (sifir-kopya encode hatti bozulmasin diye), bu deger
-	// yalniz metadata olarak tasinir; alici taraf (server/protocol.py,
-	// veya baska bir adaptor) kareyi bu kadar dondurup gostermeli. Standart
-	// video konteynerlerinin (MP4 "rotation matrix" vb.) yaptigi tam olarak
-	// bu -- piksel yerine metadata donduruluyor.
+	// rotation_degrees: the camera sensor's ACAMERA_SENSOR_ORIENTATION value
+	// (0/90/180/270, clockwise) -- the frame data ITSELF is never rotated
+	// (so the zero-copy encode path stays intact), this value is carried as
+	// metadata only; the receiving side (server/protocol.py, or another
+	// adapter) must rotate the frame by this amount before displaying it.
+	// Exactly what standard video containers (MP4 "rotation matrix" etc.)
+	// do -- rotate the metadata, not the pixels.
 	virtual void write_video_config(const uint8_t *sps_pps_annexb, size_t size, int32_t rotation_degrees) = 0;
 	virtual void write_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) = 0;
 	virtual void close() = 0;

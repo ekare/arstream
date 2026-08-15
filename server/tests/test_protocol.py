@@ -1,6 +1,6 @@
-"""protocol.py'nin fixtures/*.bin (bkz. fixtures/generate_fixtures.py) golden-byte
-dosyalarina karsi testleri. Ayni fixture'lar mobile/native/tests/protocol_test.cpp
-tarafindan da kullanilir -- ikisi burada ayrisirsa CI kirilir."""
+"""Tests for protocol.py against the golden-byte fixtures/*.bin files (see
+fixtures/generate_fixtures.py). The same fixtures are also used by
+mobile/native/tests/protocol_test.cpp -- if the two drift apart here, CI breaks."""
 
 from pathlib import Path
 
@@ -50,7 +50,7 @@ def test_point_cloud_matches_fixture():
     assert encoded == _read_fixture("point_cloud.bin")
 
 
-# -- Round-trip testleri (encode -> decode -> orijinal deger) --
+# -- Round-trip tests (encode -> decode -> original value) --
 
 
 def test_header_round_trip():
@@ -118,7 +118,7 @@ def test_camera_intrinsics_round_trip():
     assert protocol.decode_camera_intrinsics(msg.payload) == pytest.approx((1.0, 2.0, 3.0, 4.0, 100, 200))
 
 
-# -- Ileri-uyumluluk: bilinmeyen msg_type payload_length ile guvenle atlanir --
+# -- Forward compatibility: an unknown msg_type is safely skipped via payload_length --
 
 
 def test_unknown_msg_type_is_skippable():

@@ -1,14 +1,14 @@
-"""arstream kablo protokolu v1 -- docs/PROTOCOL.md'nin birebir Python yansimasi.
+"""arstream wire protocol v1 -- a faithful Python mirror of docs/PROTOCOL.md.
 
-mobile/native/src/net/protocol.cpp ile bire-bir ayni tel formatini konusur.
-Ikisi de docs/PROTOCOL.md'ye karsi bagimsiz yazildi; fixtures/ altindaki
-golden-byte dosyalari ikisinin sessizce ayrismadigini dogrular
-(bkz. tests/test_protocol.py).
+Speaks the exact same wire format as mobile/native/src/net/protocol.cpp.
+Both were written independently against docs/PROTOCOL.md; the golden-byte
+files under fixtures/ verify that the two haven't silently drifted apart
+(see tests/test_protocol.py).
 
-C++ tarafinin aksine burada JSON govdeli mesajlar (HELLO, VIDEO_CONFIG'in
-json kismi, STATUS, GOODBYE) da tam encode/decode edilir -- Python'da
-stdlib json'un maliyeti sifir, C++ tarafinda ise bilincli olarak opak
-byte'lar olarak birakildi (bkz. protocol.h basindaki not).
+Unlike the C++ side, JSON-bodied messages (HELLO, VIDEO_CONFIG's json part,
+STATUS, GOODBYE) are fully encoded/decoded here too -- stdlib json costs
+nothing in Python, whereas on the C++ side it's deliberately left as opaque
+bytes (see the note at the top of protocol.h).
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def encode_header(h: Header) -> bytes:
 
 def decode_header(data: bytes) -> Header:
     if len(data) < HEADER_SIZE:
-        raise ProtocolError(f"header icin en az {HEADER_SIZE} byte gerekir, {len(data)} geldi")
+        raise ProtocolError(f"header requires at least {HEADER_SIZE} bytes, got {len(data)}")
     payload_length, msg_type, flags, protocol_version, sequence_number = _HEADER_STRUCT.unpack_from(data, 0)
     return Header(payload_length, msg_type, flags, protocol_version, sequence_number)
 
@@ -92,8 +92,8 @@ def _wrap(msg_type: MsgType, seq: int, payload: bytes) -> bytes:
 
 
 def next_message(buffer: bytes) -> tuple[Message, int] | None:
-    """Bilinmeyen msg_type'lari da guvenle atlar -- buffer'da tam bir mesaj
-    yoksa None doner (cagiran taraf daha fazla byte gelene kadar beklemeli)."""
+    """Safely skips unknown msg_types too -- returns None if the buffer
+    doesn't contain a complete message yet (the caller should wait for more bytes)."""
     if len(buffer) < HEADER_SIZE:
         return None
     header = decode_header(buffer)
@@ -105,7 +105,7 @@ def next_message(buffer: bytes) -> tuple[Message, int] | None:
 
 
 def iter_messages(buffer: bytes):
-    """buffer icindeki tum tam mesajlari sirayla verir (generator)."""
+    """Yields every complete message in buffer, in order (generator)."""
     offset = 0
     while True:
         result = next_message(buffer[offset:])
@@ -116,7 +116,7 @@ def iter_messages(buffer: bytes):
         offset += consumed
 
 
-# -- HELLO / HELLO_ACK / STATUS / GOODBYE (JSON govde) --
+# -- HELLO / HELLO_ACK / STATUS / GOODBYE (JSON body) --
 
 
 def encode_hello(seq: int, body: dict) -> bytes:
@@ -151,7 +151,7 @@ def decode_goodbye(payload: bytes) -> dict:
     return json.loads(payload.decode("utf-8"))
 
 
-# -- Saat senkronizasyonu --
+# -- Clock synchronization --
 
 
 def encode_clock_sync_request(seq: int, client_send_time_ns: int) -> bytes:
@@ -222,7 +222,7 @@ def decode_imu_batch(payload: bytes) -> list[ImuSample]:
     return samples
 
 
-# -- ARCore opsiyonel alanlar --
+# -- Optional ARCore fields --
 
 
 def encode_pose_sample(seq: int, timestamp_ns: int, tracking_state: int, x: float, y: float, z: float, qx: float, qy: float, qz: float, qw: float) -> bytes:

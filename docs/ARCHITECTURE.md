@@ -1,15 +1,15 @@
-# Mimari
+# Architecture
 
-## Genel bakış
+## Overview
 
 ```
-┌─────────────────────────── mobile/ (Godot projesi) ───────────────────────────┐
+┌─────────────────────────── mobile/ (Godot project) ───────────────────────────┐
 │                                                                                  │
-│   GDScript (UI/orkestrasyon)              native/ (GDExtension, C++)            │
+│   GDScript (UI/orchestration)              native/ (GDExtension, C++)           │
 │   ┌──────────────────┐                    ┌─────────────────────────────────┐  │
-│   │ scenes/Main.tscn  │  metod/sinyal      │ ArCapture (Godot sınıfı)         │  │
+│   │ scenes/Main.tscn  │  method/signal     │ ArCapture (Godot class)          │  │
 │   │ CaptureService.gd │◄──────────────────►│  ├─ CaptureController            │  │
-│   │ (Idle/Connecting/ │  (düşük frekans)   │  │   ├─ ArCoreCaptureSession     │  │
+│   │ (Idle/Connecting/ │  (low frequency)   │  │   ├─ ArCoreCaptureSession     │  │
 │   │  Streaming/Error) │                    │  │   │   (arcore_c_api.h)       │  │
 │   └──────────────────┘                    │  │   └─ Camera2CaptureSession    │  │
 │                                             │  │       (NDK libcamera2ndk)    │  │
@@ -22,40 +22,50 @@
                                                                │ TCP, docs/PROTOCOL.md
                                                                ▼
                                       ┌─────────────────────────────────────────┐
-                                      │ server/ (Python referans backend)         │
-                                      │  session.py  (HELLO→ACK→CLOCK_SYNC→...)  │
-                                      │  protocol.py (aynı format, ayrı impl.)    │
-                                      │  video_decoder.py (PyAV, Annex-B→kare)    │
-                                      │  sinks/ (disk / queue)                    │
+                                      │ server/ (Python reference backend)        │
+                                      │  ingest.py  (decode protocol, dispatch)   │
+                                      │  protocol.py (same format, separate impl) │
+                                      │              │                            │
+                                      │              ▼                            │
+                                      │  plugins/ (RecorderPlugin, StatsPlugin,   │
+                                      │            + external ones from            │
+                                      │            --plugins-dir)                 │
+                                      │              │                            │
+                                      │              ▼                            │
+                                      │  EventBus ──► web/app.py (FastAPI)         │
+                                      │                 /api/sessions, /ws/live,   │
+                                      │                 dashboard.html             │
                                       └─────────────────────────────────────────┘
                                                                │
                                                                ▼
-                                        (dış adaptör — başka yerde geliştiriliyor,
-                                         docs/PROTOCOL.md'ye uyar)
+                                        (external adapter — developed elsewhere,
+                                         conforms to docs/PROTOCOL.md)
 ```
 
-## Temel kararlar ve gerekçeleri
+## Key decisions and rationale
 
-| Karar | Gerekçe |
+| Decision | Rationale |
 |---|---|
-| Godot + GDExtension (C/C++), Kotlin/Swift'te İŞ MANTIĞI yok | ARCore'un resmi C API'si (`arcore_c_api.h`) + Android NDK'nın Camera2/MediaCodec/Sensor C API'leri bunu mümkün kılıyor. Camera2 geri-düşüş, `AMediaCodec` encode, `ASensorManager` IMU — hepsi saf C/C++, JNIEnv gerekmez, doğrulandı. ARCore ve iOS için aşağıdaki dar istisnalar var (bkz. "JNI bootstrap istisnası"). |
-| Sıcak veri yolu (yakalama→encode→ağ) tamamen native, GDScript'e hiç uğramıyor | 30fps'de GDScript↔native marshalling'in hiçbir faydası yok; native tarafta kalmak hem performans hem ARCore/NDK API erişimi için doğal. GDScript yalnız UI/yaşam döngüsü. |
-| ARCore vs Camera2 geri-düşüş, `CaptureController` içinde runtime kararı | Eski/düşük-uçlu cihazlarda ARCore desteklenmeyebilir (bkz. `docs/DEVICE_COMPATIBILITY.md`) — uygulama çökmek yerine ham kamera+IMU yakalamaya düşer. |
-| Tek TCP bağlantısı, özel ikili çerçeveleme (WebRTC/UDP değil) | Godot'un yerleşik WebRTC desteği yalnız data-channel (RTP/media track yok) — video için gerçek bir kazanç sağlamıyor. Basit, debug edilebilir, "sade" felsefesiyle tutarlı. v2'de aynı mesaj formatı farklı bir taşıma üzerinden (WebRTC data-channel, UDP/QUIC) sunulabilir — bkz. `docs/ROADMAP.md`. |
-| Annex-B NAL çerçeveleme (AVCC değil) | Hem `AMediaCodec` hem `VTCompressionSession`'ın doğal çıktısı, PyAV/ffmpeg'in doğal girdisi — dönüştürme adımı yok. |
-| Python referans sunucu, dış adaptörün YERİNE değil | `server/`, protokolün "yaşayan dokümantasyonu" ve kendi doğrulama alıcımız — üretim ingestion servisi değil. |
+| Godot + GDExtension (C/C++), NO business logic in Kotlin/Swift | ARCore's official C API (`arcore_c_api.h`) + Android NDK's Camera2/MediaCodec/Sensor C APIs make this possible. Camera2 fallback, `AMediaCodec` encode, `ASensorManager` IMU — all pure C/C++, no JNIEnv needed, verified. There are narrow exceptions for ARCore and iOS below (see "JNI bootstrap exception"). |
+| Hot data path (capture→encode→network) is entirely native, never touches GDScript | At 30fps, GDScript↔native marshalling gains nothing; staying native is the natural choice both for performance and for ARCore/NDK API access. GDScript is UI/lifecycle only. |
+| ARCore vs. Camera2 fallback decided at runtime inside `CaptureController` | ARCore may not be supported on older/low-end devices (see `docs/DEVICE_COMPATIBILITY.md`) — the app falls back to raw camera+IMU capture instead of crashing. |
+| Single TCP connection, custom binary framing (not WebRTC/UDP) | Godot's built-in WebRTC support is data-channel only (no RTP/media track) — no real win for video. Simple, debuggable, consistent with the "keep it simple" philosophy. In v2, the same message format could be offered over a different transport (WebRTC data-channel, UDP/QUIC) — see `docs/ROADMAP.md`. |
+| Annex-B NAL framing (not AVCC) | The natural output of both `AMediaCodec` and `VTCompressionSession`, and the natural input to PyAV/ffmpeg — no conversion step. |
+| Python reference server, NOT a replacement for the external adapter | `server/` is the protocol's "living documentation" and our own verification receiver — not a production ingestion service. |
+| `server/` is plugin-based (not raw logging) | Anything that processes/observes the incoming stream (recording, stats, future analysis) uses the same `StreamPlugin` interface; `ingest.py` knows nothing beyond decoding the protocol. A plugin's failure never stops the others or the ingest itself (`PluginManager` isolates it). |
+| Dashboard runs FastAPI/uvicorn in the same asyncio loop | Runs in the same process/loop as the ingest server (`asyncio.gather` in `cli.py`) — no separate process/IPC. `EventBus` (an asyncio.Queue-based pub-sub) bridges plugins to the dashboard's `/ws/live`. |
 
-## JNI bootstrap istisnası (Android)
+## JNI bootstrap exception (Android)
 
-Godot 4.x'in GDExtension sistemi, Android'de native koddan `JNIEnv*`/`Activity` context'ine erişim için **resmi bir yol sunmuyor** — Godot 3.x'in GDNative'inde vardı (`godot_android_get_env()`), 4.x'e taşınmadı ve hâlâ açık bir motor eksikliği: [godot-proposals #6734](https://github.com/godotengine/godot-proposals/issues/6734). Topluluğun bulduğu tek çözüm (ve mevcut tek prior-art projesi [`paddy-exe/arcore-gdextension`](https://github.com/paddy-exe/arcore-gdextension)'ın yaptığı da bu): minik bir Android Plugin (Kotlin), Godot tarafından örneklendiğinde eline geçen `JNIEnv*`/`Activity` pointer'larını bir native metoda iletir, başka hiçbir şey yapmaz.
+Godot 4.x's GDExtension system provides **no official way** to access the `JNIEnv*`/`Activity` context from native code on Android — Godot 3.x's GDNative had this (`godot_android_get_env()`), it wasn't carried over to 4.x, and it's still an open engine gap: [godot-proposals #6734](https://github.com/godotengine/godot-proposals/issues/6734). The only workaround the community has found (and what the one existing prior-art project, [`paddy-exe/arcore-gdextension`](https://github.com/paddy-exe/arcore-gdextension), does too): a tiny Android Plugin (Kotlin) that, once instantiated by Godot, hands the `JNIEnv*`/`Activity` pointers it receives to a native method and does nothing else.
 
-**Kapsam dışı bırakılanlar** (JNIEnv gerekmiyor, saf C/C++, doğrulandı):
-- Camera2 geri-düşüş yakalama (`libcamera2ndk`)
-- `AMediaCodec` H.264 encode
-- `ASensorManager`/`ASensorEventQueue` IMU örnekleme (`ASensorManager_getInstanceForPackage` bir paket adı ister, Context değil)
-- Ağ/protokol katmanı (BSD sockets)
-- Kamera izni isteme (`OS.request_permission("CAMERA")` — GDScript'ten, Godot'un kendi motor API'si, bizim JNI köprümüze ihtiyaç duymaz)
+**Explicitly out of scope for this** (no JNIEnv needed, pure C/C++, verified):
+- Camera2 fallback capture (`libcamera2ndk`)
+- `AMediaCodec` H.264 encoding
+- `ASensorManager`/`ASensorEventQueue` IMU sampling (`ASensorManager_getInstanceForPackage` wants a package name, not a Context)
+- Network/protocol layer (BSD sockets)
+- Requesting camera permission (`OS.request_permission("CAMERA")` — from GDScript, Godot's own engine API, doesn't need our JNI bridge)
 
-**Kapsama giren tek şey:** `mobile/android/plugins/jni_bootstrap/` — tek bir Kotlin dosyası (`JniBootstrapPlugin.kt`), Godot Android Plugin sistemine (`@UsedByGodot`) kaydolur, `onMainCreate`/`onMainActivityResult` gibi bir yaşam döngüsü noktasında `JNIEnv*` ve `Activity` referansını bir kez native tarafa (`extern "C"` fonksiyon) iletir. Bundan sonra `ArCoreCaptureSession` bu pointer'ları saklar, `arcore_c_api.h`'nin tüm çağrılarını (`ArSession_create`, `ArSession_update`, vb.) doğrudan C++'tan yapar. Bu dosyada **hiçbir ARCore/iş mantığı yok** — yalnızca pointer aktarımı.
+**The only thing that needs it:** `mobile/android/plugins/jni_bootstrap/` — a single Kotlin file (`JniBootstrapPlugin.kt`) that registers with Godot's Android Plugin system (`@UsedByGodot`) and, at a lifecycle point like `onMainCreate`/`onMainActivityResult`, hands the `JNIEnv*` and `Activity` reference to the native side (an `extern "C"` function) exactly once. From then on, `ArCoreCaptureSession` holds onto those pointers and makes all `arcore_c_api.h` calls (`ArSession_create`, `ArSession_update`, etc.) directly from C++. This file contains **zero ARCore/business logic** — only pointer handoff.
 
-Ayrıntılı kablo formatı: [`PROTOCOL.md`](PROTOCOL.md). Kilometre taşları ve ertelenen kararlar: [`ROADMAP.md`](ROADMAP.md).
+Detailed wire format: [`PROTOCOL.md`](PROTOCOL.md). Milestones and deferred decisions: [`ROADMAP.md`](ROADMAP.md).

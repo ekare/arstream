@@ -16,11 +16,12 @@
 
 namespace godot {
 
-// GDScript'e acilan tek yuzey: ArCapture. Sicak veri yolu (yakalama/encode/
-// dosyaya-yazma) burada, native tarafta kalir -- bkz. docs/ARCHITECTURE.md
-// "Mimari karar" bolumu. M2/M3: Camera2 geri-dusus + AMediaCodec H.264 encode +
-// "save" (dosya) / "stream" (kuk, M4/M5) secilebilir cikis + kayittan bagimsiz
-// acilip kapanabilen (async) onizleme.
+// The single surface exposed to GDScript: ArCapture. The hot data path
+// (capture/encode/write-to-file) lives here, on the native side -- see the
+// "Architectural decisions" section of docs/ARCHITECTURE.md. M2/M3: Camera2
+// fallback + AMediaCodec H.264 encode + "save" (file) / "stream" (stub,
+// M4/M5) selectable output + preview that can be toggled on/off (async)
+// independently of recording.
 class ArCapture : public RefCounted {
 	GDCLASS(ArCapture, RefCounted)
 
@@ -40,23 +41,28 @@ public:
 	ArCapture();
 	~ArCapture();
 
-	// M1 duman testi: GDScript -> native -> sinyal round-trip'i kanitlar.
+	// M1 smoke test: proves the GDScript -> native -> signal round trip.
 	void ping(const String &p_message);
 
-	// M2/M3/M5: yakalama + encode + kayit/stream.
+	// M2/M3/M5: capture + encode + record/stream.
 	// config: {mode: "save"|"stream",
-	//          output_path: String,              -- yalniz save
-	//          host: String, port: int,           -- yalniz stream
-	//          spool_path: String,                -- yalniz stream: bellek dolunca tasan disk dosyasi
+	//          output_path: String,              -- save only
+	//          host: String, port: int,           -- stream only
+	//          spool_path: String,                -- stream only: disk file used once memory fills up
 	//          width/height/fps/bitrate_bps: int}
 	void start_capture(const Dictionary &p_config);
 	void stop_capture();
 
-	// Kayittan bagimsiz (async) onizleme -- GDScript once get_preview_texture()
-	// ile bos bir dokuyu TextureRect'e atar, sonra istedigi an ac/kapat.
+	// Preview, toggleable independently of recording (async) -- GDScript
+	// first assigns an empty texture to the TextureRect via
+	// get_preview_texture(), then turns it on/off whenever it wants.
+	// WHILE capture (recording/streaming) is running, this just flips a flag
+	// on the same (encoder-backed) session. WHILE capture is NOT running, it
+	// opens/closes its own encoder-less camera session -- so preview also
+	// works before recording starts and after it stops (see ar_capture.cpp).
 	Ref<ImageTexture> get_preview_texture();
 	void set_preview_enabled(bool p_enabled);
-	// call_deferred hedefi -- ana thread disinda cagirilmamali.
+	// call_deferred target -- must not be called off the main thread.
 	void _update_preview_texture(PackedByteArray p_data, int p_width, int p_height);
 
 #ifdef ANDROID_ENABLED
@@ -70,11 +76,12 @@ private:
 	int64_t stat_bytes_ = 0;
 	std::chrono::steady_clock::time_point stat_start_time_;
 
-	// ACAMERA_SENSOR_ORIENTATION -- kamera sensoru fiziksel olarak cihazin
-	// dogal yonune gore donuk monte edilir (cogu telefonda 90 derece).
-	// start_capture()'da encoder'dan ONCE sorgulanir (bkz. camera2_capture_
-	// session.h "query_back_camera_sensor_orientation" notu), hem onizlemeyi
-	// dogru cevirmek hem VIDEO_CONFIG metadata'sina koymak icin kullanilir.
+	// ACAMERA_SENSOR_ORIENTATION -- the camera sensor is physically mounted
+	// rotated relative to the device's natural orientation (90 degrees on
+	// most phones). Queried in start_capture() BEFORE the encoder (see the
+	// "query_back_camera_sensor_orientation" note in camera2_capture_
+	// session.h) and used both to rotate the preview correctly and to fill
+	// in the VIDEO_CONFIG metadata.
 	int32_t sensor_orientation_ = 0;
 
 	void on_encoder_config(const uint8_t *sps_pps, size_t size);

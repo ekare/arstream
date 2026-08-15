@@ -1,9 +1,9 @@
-// mobile/native/src/net/protocol.cpp icin host-native testler -- Godot/SCons
-// godot-cpp zincirine hic girmez, cihaz/emulator gerekmez. Ayni fixtures/*.bin
-// dosyalari server/tests/test_protocol.py tarafindan da kullanilir; ikisi
-// burada ayrisirsa bu test kirilir.
+// Host-native tests for mobile/native/src/net/protocol.cpp -- has no
+// dependency on the Godot/SCons/godot-cpp chain, no device/emulator needed.
+// The same fixtures/*.bin files are also used by
+// server/tests/test_protocol.py; if the two drift apart, this test breaks.
 //
-// Calistir: mobile/native/tests/protocol_test(.exe)  (repo kokunden)
+// Run: mobile/native/tests/protocol_test(.exe)  (from the repo root)
 
 #include "../src/net/protocol.h"
 
@@ -21,11 +21,11 @@ int g_failures = 0;
 int g_checks = 0;
 
 std::vector<uint8_t> read_fixture(const std::string &name) {
-	// Bu dosya mobile/native/tests/ altinda calistirilir varsayilir; repo
-	// kokune 3 seviye yukaridan cikip fixtures/'a iner.
+	// Assumes this is run from mobile/native/tests/; goes up 3 levels to the
+	// repo root then down into fixtures/.
 	std::ifstream f("../../../fixtures/" + name, std::ios::binary);
 	if (!f) {
-		std::cerr << "UYARI: fixture acilamadi: " << name << " (calisma dizini repo koku mu?)\n";
+		std::cerr << "WARNING: could not open fixture: " << name << " (is the working directory the repo root?)\n";
 		return {};
 	}
 	return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -43,7 +43,7 @@ void check_bytes_equal(const std::vector<uint8_t> &actual, const std::vector<uin
 	g_checks++;
 	if (actual != expected) {
 		g_failures++;
-		std::cerr << "FAIL: " << what << " -- boyutlar: actual=" << actual.size() << " expected=" << expected.size() << "\n";
+		std::cerr << "FAIL: " << what << " -- sizes: actual=" << actual.size() << " expected=" << expected.size() << "\n";
 	}
 }
 
@@ -91,20 +91,20 @@ void test_header_round_trip() {
 	h.sequence_number = 7;
 	auto encoded = encode_header(h);
 	Header decoded;
-	check(decode_header(encoded.data(), encoded.size(), decoded), "header decode basarili");
-	check(decoded.payload_length == 42 && decoded.msg_type == 0x20 && decoded.sequence_number == 7, "header round-trip degerleri esit");
+	check(decode_header(encoded.data(), encoded.size(), decoded), "header decode succeeds");
+	check(decoded.payload_length == 42 && decoded.msg_type == 0x20 && decoded.sequence_number == 7, "header round-trip values match");
 }
 
 void test_clock_sync_response_round_trip() {
 	auto encoded = encode_clock_sync_response(1, 10, 20, 30);
 	MessageView msg;
 	size_t consumed = 0;
-	check(next_message(encoded.data(), encoded.size(), msg, consumed), "clock_sync_response next_message basarili");
-	check(consumed == encoded.size(), "clock_sync_response tum buffer tuketildi");
-	check(msg.header.msg_type == static_cast<uint8_t>(MsgType::ClockSyncResponse), "clock_sync_response msg_type dogru");
+	check(next_message(encoded.data(), encoded.size(), msg, consumed), "clock_sync_response next_message succeeds");
+	check(consumed == encoded.size(), "clock_sync_response consumed the whole buffer");
+	check(msg.header.msg_type == static_cast<uint8_t>(MsgType::ClockSyncResponse), "clock_sync_response msg_type is correct");
 	int64_t a, b, c;
-	check(decode_clock_sync_response(msg.payload, msg.payload_size, a, b, c), "clock_sync_response decode basarili");
-	check(a == 10 && b == 20 && c == 30, "clock_sync_response degerleri dogru");
+	check(decode_clock_sync_response(msg.payload, msg.payload_size, a, b, c), "clock_sync_response decode succeeds");
+	check(a == 10 && b == 20 && c == 30, "clock_sync_response values are correct");
 }
 
 void test_imu_batch_round_trip() {
@@ -112,12 +112,12 @@ void test_imu_batch_round_trip() {
 	auto encoded = encode_imu_batch(1, samples);
 	MessageView msg;
 	size_t consumed = 0;
-	check(next_message(encoded.data(), encoded.size(), msg, consumed), "imu_batch next_message basarili");
+	check(next_message(encoded.data(), encoded.size(), msg, consumed), "imu_batch next_message succeeds");
 	std::vector<ImuSample> decoded;
-	check(decode_imu_batch(msg.payload, msg.payload_size, decoded), "imu_batch decode basarili");
-	check(decoded.size() == 2, "imu_batch 2 ornek");
-	check(decoded[0].sensor_type == 0 && decoded[0].timestamp_ns == 1 && decoded[0].x == 1.0f, "imu_batch ilk ornek dogru");
-	check(decoded[1].sensor_type == 1 && decoded[1].z == 6.0f, "imu_batch ikinci ornek dogru");
+	check(decode_imu_batch(msg.payload, msg.payload_size, decoded), "imu_batch decode succeeds");
+	check(decoded.size() == 2, "imu_batch has 2 samples");
+	check(decoded[0].sensor_type == 0 && decoded[0].timestamp_ns == 1 && decoded[0].x == 1.0f, "imu_batch first sample is correct");
+	check(decoded[1].sensor_type == 1 && decoded[1].z == 6.0f, "imu_batch second sample is correct");
 }
 
 void test_point_cloud_round_trip() {
@@ -125,11 +125,11 @@ void test_point_cloud_round_trip() {
 	auto encoded = encode_point_cloud(1, 99, points);
 	MessageView msg;
 	size_t consumed = 0;
-	check(next_message(encoded.data(), encoded.size(), msg, consumed), "point_cloud next_message basarili");
+	check(next_message(encoded.data(), encoded.size(), msg, consumed), "point_cloud next_message succeeds");
 	int64_t ts;
 	std::vector<Point> decoded;
-	check(decode_point_cloud(msg.payload, msg.payload_size, ts, decoded), "point_cloud decode basarili");
-	check(ts == 99 && decoded.size() == 1 && decoded[0].confidence == 0.5f, "point_cloud degerleri dogru");
+	check(decode_point_cloud(msg.payload, msg.payload_size, ts, decoded), "point_cloud decode succeeds");
+	check(ts == 99 && decoded.size() == 1 && decoded[0].confidence == 0.5f, "point_cloud values are correct");
 }
 
 void test_video_chunk_round_trip() {
@@ -137,27 +137,27 @@ void test_video_chunk_round_trip() {
 	auto encoded = encode_video_chunk(1, 123456, true, nal.data(), nal.size());
 	MessageView msg;
 	size_t consumed = 0;
-	check(next_message(encoded.data(), encoded.size(), msg, consumed), "video_chunk next_message basarili");
-	check(msg.payload_size == 9 + nal.size(), "video_chunk payload boyutu dogru");
-	check((msg.payload[8] & 0x01) != 0, "video_chunk keyframe biti set");
-	check(memcmp(msg.payload + 9, nal.data(), nal.size()) == 0, "video_chunk NAL verisi dogru");
+	check(next_message(encoded.data(), encoded.size(), msg, consumed), "video_chunk next_message succeeds");
+	check(msg.payload_size == 9 + nal.size(), "video_chunk payload size is correct");
+	check((msg.payload[8] & 0x01) != 0, "video_chunk keyframe bit is set");
+	check(memcmp(msg.payload + 9, nal.data(), nal.size()) == 0, "video_chunk NAL data is correct");
 }
 
 void test_hello_frames_json_opaque() {
-	// C++ tarafi JSON'u ayristirmiyor (bkz. protocol.h notu) -- yalniz
-	// cerceveleme (header + tam payload sinirlari) test edilir.
+	// The C++ side doesn't parse JSON (see the note in protocol.h) -- only
+	// framing (header + exact payload boundaries) is tested here.
 	std::string json = R"({"device_id":"abc-123"})";
 	auto encoded = encode_hello(1, json);
 	MessageView msg;
 	size_t consumed = 0;
-	check(next_message(encoded.data(), encoded.size(), msg, consumed), "hello next_message basarili");
-	check(msg.header.msg_type == static_cast<uint8_t>(MsgType::Hello), "hello msg_type dogru");
+	check(next_message(encoded.data(), encoded.size(), msg, consumed), "hello next_message succeeds");
+	check(msg.header.msg_type == static_cast<uint8_t>(MsgType::Hello), "hello msg_type is correct");
 	std::string decoded(reinterpret_cast<const char *>(msg.payload), msg.payload_size);
-	check(decoded == json, "hello JSON govdesi degismeden geldi");
+	check(decoded == json, "hello JSON body arrived unchanged");
 }
 
 void test_unknown_msg_type_is_skippable() {
-	// Ileri-uyumluluk: bilinmeyen msg_type, payload_length sayesinde guvenle atlanir.
+	// Forward compatibility: an unknown msg_type can be safely skipped thanks to payload_length.
 	Header unknown_header;
 	unknown_header.payload_length = 4;
 	unknown_header.msg_type = 0x99;
@@ -170,22 +170,22 @@ void test_unknown_msg_type_is_skippable() {
 
 	MessageView msg1;
 	size_t consumed1 = 0;
-	check(next_message(buffer.data(), buffer.size(), msg1, consumed1), "bilinmeyen mesaj next_message basarili");
-	check(msg1.header.msg_type == 0x99, "bilinmeyen mesaj tipi korunuyor");
+	check(next_message(buffer.data(), buffer.size(), msg1, consumed1), "unknown message next_message succeeds");
+	check(msg1.header.msg_type == 0x99, "unknown message type is preserved");
 
 	MessageView msg2;
 	size_t consumed2 = 0;
-	check(next_message(buffer.data() + consumed1, buffer.size() - consumed1, msg2, consumed2), "atlama sonrasi ikinci mesaj bulunuyor");
+	check(next_message(buffer.data() + consumed1, buffer.size() - consumed1, msg2, consumed2), "second message is found after the skip");
 	int64_t t;
-	check(decode_clock_sync_request(msg2.payload, msg2.payload_size, t) && t == 42, "atlama sonrasi ikinci mesaj dogru cozuluyor");
+	check(decode_clock_sync_request(msg2.payload, msg2.payload_size, t) && t == 42, "second message decodes correctly after the skip");
 }
 
 void test_incomplete_buffer_returns_false() {
 	auto encoded = encode_clock_sync_request(1, 1);
 	MessageView msg;
 	size_t consumed = 0;
-	check(!next_message(encoded.data(), encoded.size() - 1, msg, consumed), "eksik buffer false donuyor");
-	check(!next_message(encoded.data(), 5, msg, consumed), "eksik header false donuyor");
+	check(!next_message(encoded.data(), encoded.size() - 1, msg, consumed), "incomplete buffer returns false");
+	check(!next_message(encoded.data(), 5, msg, consumed), "incomplete header returns false");
 }
 
 } // namespace
@@ -206,6 +206,6 @@ int main() {
 	test_unknown_msg_type_is_skippable();
 	test_incomplete_buffer_returns_false();
 
-	std::cout << g_checks << " kontrol, " << g_failures << " basarisiz\n";
+	std::cout << g_checks << " checks, " << g_failures << " failed\n";
 	return g_failures == 0 ? 0 : 1;
 }

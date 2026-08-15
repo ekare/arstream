@@ -5,16 +5,16 @@
 
 namespace arstream {
 
-// Ince bir TCP soket sarmalayicisi -- yeniden baglanma/tampon mantigi
-// TASIMAZ, bu StreamSink'in isi (bkz. stream_sink.h). Burasi yalniz "bagli
-// mi, veri gonder, kapat".
+// A thin TCP socket wrapper -- does NOT carry reconnect/buffering logic,
+// that's StreamSink's job (see stream_sink.h). This is just "connected or
+// not, send data, close".
 class StreamClient {
 public:
 	~StreamClient();
 
 	bool connect_to(const std::string &host, uint16_t port, int timeout_ms, std::string &out_error);
-	// Kismi gonderimi kendi icinde tamamlar; soket hatasinda false doner
-	// (StreamSink bunu "baglanti koptu" olarak yorumlayip yeniden dener).
+	// Completes partial sends internally; returns false on a socket error
+	// (StreamSink interprets this as "connection dropped" and retries).
 	bool send_all(const uint8_t *data, size_t size);
 	void disconnect();
 	bool is_connected() const { return connected_; }
