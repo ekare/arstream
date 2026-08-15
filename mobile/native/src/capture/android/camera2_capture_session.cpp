@@ -1,0 +1,251 @@
+#include "camera2_capture_session.h"
+
+#include <camera/NdkCameraMetadataTags.h>
+#include <media/NdkImage.h>
+
+namespace arstream {
+
+namespace {
+
+void on_device_disconnected(void *context, ACameraDevice *device) {
+	(void)device;
+	static_cast<Camera2CaptureSession *>(context)->notify_error("Kamera baglantisi kesildi");
+}
+
+void on_device_error(void *context, ACameraDevice *device, int error) {
+	(void)device;
+	static_cast<Camera2CaptureSession *>(context)->notify_error("Kamera hatasi (kod " + std::to_string(error) + ")");
+}
+
+void on_session_closed(void *context, ACameraCaptureSession *session) {
+	(void)context;
+	(void)session;
+}
+
+void on_session_ready(void *context, ACameraCaptureSession *session) {
+	(void)context;
+	(void)session;
+}
+
+void on_session_active(void *context, ACameraCaptureSession *session) {
+	(void)context;
+	(void)session;
+}
+
+// AImageReader onizleme karesi geldiginde cagrilir. preview_enabled degilse
+// hemen birak -- boylece CPU maliyeti yalniz kullanici onizlemeyi actiginda var.
+void on_preview_image_available(void *context, AImageReader *reader) {
+	auto *self = static_cast<Camera2CaptureSession *>(context);
+	AImage *image = nullptr;
+	if (AImageReader_acquireLatestImage(reader, &image) != AMEDIA_OK || image == nullptr) {
+		return;
+	}
+	if (self->is_preview_enabled()) {
+		uint8_t *y_data = nullptr;
+		int y_len = 0;
+		int32_t row_stride = 0;
+		int32_t width = 0, height = 0;
+		AImage_getPlaneData(image, 0, &y_data, &y_len);
+		AImage_getPlaneRowStride(image, 0, &row_stride);
+		AImage_getWidth(image, &width);
+		AImage_getHeight(image, &height);
+		if (y_data != nullptr) {
+			self->notify_preview_frame(y_data, width, height, row_stride);
+		}
+	}
+	AImage_delete(image);
+}
+
+} // namespace
+
+Camera2CaptureSession::~Camera2CaptureSession() {
+	stop();
+}
+
+void Camera2CaptureSession::notify_error(const std::string &message) {
+	if (on_error_) {
+		on_error_(message);
+	}
+}
+
+void Camera2CaptureSession::notify_preview_frame(const uint8_t *y_plane, int32_t width, int32_t height, int32_t row_stride) {
+	if (on_preview_frame_) {
+		on_preview_frame_(y_plane, width, height, row_stride);
+	}
+}
+
+std::string Camera2CaptureSession::find_back_camera_id() {
+	ACameraIdList *id_list = nullptr;
+	if (ACameraManager_getCameraIdList(manager_, &id_list) != ACAMERA_OK || id_list == nullptr) {
+		return "";
+	}
+
+	std::string result;
+	for (int i = 0; i < id_list->numCameras; i++) {
+		const char *id = id_list->cameraIds[i];
+		ACameraMetadata *metadata = nullptr;
+		if (ACameraManager_getCameraCharacteristics(manager_, id, &metadata) != ACAMERA_OK || metadata == nullptr) {
+			continue;
+		}
+		ACameraMetadata_const_entry entry;
+		if (ACameraMetadata_getConstEntry(metadata, ACAMERA_LENS_FACING, &entry) == ACAMERA_OK && entry.count > 0) {
+			if (entry.data.u8[0] == ACAMERA_LENS_FACING_BACK) {
+				result = id;
+				ACameraMetadata_free(metadata);
+				break;
+			}
+		}
+		ACameraMetadata_free(metadata);
+	}
+
+	if (result.empty() && id_list->numCameras > 0) {
+		// Arka kamera bulunamadiysa ilk kamerayla devam et (ornegin yalniz on
+		// kameralı bir cihaz).
+		result = id_list->cameraIds[0];
+	}
+
+	ACameraManager_deleteCameraIdList(id_list);
+	return result;
+}
+
+bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width, int32_t height,
+		int32_t preview_width, int32_t preview_height,
+		ErrorCallback on_error, PreviewFrameCallback on_preview_frame,
+		std::string &out_error) {
+	(void)width;
+	(void)height;
+	on_error_ = on_error;
+	on_preview_frame_ = on_preview_frame;
+
+	manager_ = ACameraManager_create();
+	if (manager_ == nullptr) {
+		out_error = "ACameraManager olusturulamadi";
+		return false;
+	}
+
+	std::string camera_id = find_back_camera_id();
+	if (camera_id.empty()) {
+		out_error = "Kullanilabilir kamera bulunamadi";
+		ACameraManager_delete(manager_);
+		manager_ = nullptr;
+		return false;
+	}
+
+	ACameraDevice_StateCallbacks device_callbacks = {};
+	device_callbacks.context = this;
+	device_callbacks.onDisconnected = on_device_disconnected;
+	device_callbacks.onError = on_device_error;
+
+	camera_status_t open_status = ACameraManager_openCamera(manager_, camera_id.c_str(), &device_callbacks, &device_);
+	if (open_status != ACAMERA_OK || device_ == nullptr) {
+		out_error = "Kamera acilamadi (kod " + std::to_string(open_status) + ") -- CAMERA izni verildi mi?";
+		ACameraManager_delete(manager_);
+		manager_ = nullptr;
+		return false;
+	}
+
+	// Onizleme okuyucusu: kucuk cozunurluk, YUV420 -- yalniz Y (parlaklik)
+	// duzlemi kullanilir, gri tonlamali basit bir onizleme icin yeterli.
+	if (AImageReader_new(preview_width, preview_height, AIMAGE_FORMAT_YUV_420_888, 2, &preview_reader_) != AMEDIA_OK || preview_reader_ == nullptr) {
+		out_error = "Onizleme AImageReader olusturulamadi";
+		stop();
+		return false;
+	}
+	AImageReader_ImageListener listener{};
+	listener.context = this;
+	listener.onImageAvailable = on_preview_image_available;
+	AImageReader_setImageListener(preview_reader_, &listener);
+
+	ANativeWindow *preview_window = nullptr;
+	if (AImageReader_getWindow(preview_reader_, &preview_window) != AMEDIA_OK || preview_window == nullptr) {
+		out_error = "Onizleme surface'i alinamadi";
+		stop();
+		return false;
+	}
+
+	ACaptureSessionOutputContainer_create(&output_container_);
+
+	ACaptureSessionOutput_create(encoder_surface, &encoder_output_);
+	ACaptureSessionOutputContainer_add(output_container_, encoder_output_);
+	ACameraOutputTarget_create(encoder_surface, &encoder_target_);
+
+	ACaptureSessionOutput_create(preview_window, &preview_output_);
+	ACaptureSessionOutputContainer_add(output_container_, preview_output_);
+	ACameraOutputTarget_create(preview_window, &preview_target_);
+
+	if (ACameraDevice_createCaptureRequest(device_, TEMPLATE_RECORD, &request_) != ACAMERA_OK || request_ == nullptr) {
+		out_error = "Capture request olusturulamadi";
+		stop();
+		return false;
+	}
+	ACaptureRequest_addTarget(request_, encoder_target_);
+	ACaptureRequest_addTarget(request_, preview_target_);
+
+	ACameraCaptureSession_stateCallbacks session_callbacks = {};
+	session_callbacks.context = this;
+	session_callbacks.onClosed = on_session_closed;
+	session_callbacks.onReady = on_session_ready;
+	session_callbacks.onActive = on_session_active;
+
+	if (ACameraDevice_createCaptureSession(device_, output_container_, &session_callbacks, &session_) != ACAMERA_OK || session_ == nullptr) {
+		out_error = "Capture session olusturulamadi";
+		stop();
+		return false;
+	}
+
+	if (ACameraCaptureSession_setRepeatingRequest(session_, nullptr, 1, &request_, nullptr) != ACAMERA_OK) {
+		out_error = "Repeating request baslatilamadi";
+		stop();
+		return false;
+	}
+
+	return true;
+}
+
+void Camera2CaptureSession::stop() {
+	preview_enabled_ = false;
+
+	if (session_ != nullptr) {
+		ACameraCaptureSession_stopRepeating(session_);
+		ACameraCaptureSession_close(session_);
+		session_ = nullptr;
+	}
+	if (request_ != nullptr) {
+		ACaptureRequest_free(request_);
+		request_ = nullptr;
+	}
+	if (encoder_target_ != nullptr) {
+		ACameraOutputTarget_free(encoder_target_);
+		encoder_target_ = nullptr;
+	}
+	if (preview_target_ != nullptr) {
+		ACameraOutputTarget_free(preview_target_);
+		preview_target_ = nullptr;
+	}
+	if (encoder_output_ != nullptr) {
+		ACaptureSessionOutput_free(encoder_output_);
+		encoder_output_ = nullptr;
+	}
+	if (preview_output_ != nullptr) {
+		ACaptureSessionOutput_free(preview_output_);
+		preview_output_ = nullptr;
+	}
+	if (output_container_ != nullptr) {
+		ACaptureSessionOutputContainer_free(output_container_);
+		output_container_ = nullptr;
+	}
+	if (device_ != nullptr) {
+		ACameraDevice_close(device_);
+		device_ = nullptr;
+	}
+	if (preview_reader_ != nullptr) {
+		AImageReader_delete(preview_reader_);
+		preview_reader_ = nullptr;
+	}
+	if (manager_ != nullptr) {
+		ACameraManager_delete(manager_);
+		manager_ = nullptr;
+	}
+}
+
+} // namespace arstream

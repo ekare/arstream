@@ -6,11 +6,14 @@ env = SConscript("../thirdparty/godot-cpp/SConstruct", {"api_version": "4.6"})
 
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
+sources += Glob("src/sink/*.cpp")
 
 # Platforma-ozel kaynaklar yalnizca ilgili platform hedeflenirken derlemeye dahil edilir.
 if env["platform"] == "android":
     sources += Glob("src/capture/android/*.cpp")
     sources += Glob("src/encode/*android*.cpp")
+    # NDK Camera2 + Media (AMediaCodec) -- saf C API'ler, Kotlin/JNI gerekmez.
+    env.Append(LIBS=["camera2ndk", "mediandk", "android"])
 elif env["platform"] == "ios":
     sources += Glob("src/capture/ios/*.mm")
     sources += Glob("src/encode/*ios*.cpp")

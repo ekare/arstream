@@ -9,22 +9,57 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="PreviewRect" type="TextureRect" parent="."]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-grow_horizontal = 2
-grow_vertical = 2
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+expand_mode = 1
+stretch_mode = 6
 
-[node name="PingButton" type="Button" parent="VBoxContainer"]
+[node name="Overlay" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 0
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 416.0
+offset_bottom = 320.0
+grow_horizontal = 1
+grow_vertical = 1
+
+[node name="PingButton" type="Button" parent="Overlay"]
 layout_mode = 2
 text = "Ping native"
 
-[node name="ResultLabel" type="Label" parent="VBoxContainer"]
+[node name="ResultLabel" type="Label" parent="Overlay"]
 layout_mode = 2
 text = "(henuz ping atilmadi)"
 
-[connection signal="pressed" from="VBoxContainer/PingButton" to="." method="_on_ping_button_pressed"]
+[node name="HSeparator" type="HSeparator" parent="Overlay"]
+layout_mode = 2
+
+[node name="ModeButton" type="OptionButton" parent="Overlay"]
+layout_mode = 2
+
+[node name="CaptureButton" type="Button" parent="Overlay"]
+layout_mode = 2
+disabled = true
+text = "Yakalamayi baslat"
+
+[node name="PreviewButton" type="CheckButton" parent="Overlay"]
+layout_mode = 2
+disabled = true
+text = "Onizleme"
+
+[node name="StatusLabel" type="Label" parent="Overlay"]
+layout_mode = 2
+text = "Kamera izni bekleniyor..."
+autowrap_mode = 2
+
+[connection signal="pressed" from="Overlay/PingButton" to="." method="_on_ping_button_pressed"]
+[connection signal="pressed" from="Overlay/CaptureButton" to="." method="_on_capture_button_pressed"]
+[connection signal="toggled" from="Overlay/PreviewButton" to="." method="_on_preview_button_toggled"]

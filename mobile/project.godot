@@ -14,6 +14,10 @@ config/name="arstream"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6", "Mobile")
 
+[display]
+
+window/handheld/orientation=1
+
 [native_extensions]
 
 paths=["res://arcapture.gdextension"]

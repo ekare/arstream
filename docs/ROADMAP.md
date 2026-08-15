@@ -6,9 +6,10 @@
 |---|---|---|
 | M0 | Cihaz yetenek doğrulama spike'ı | Kod-gerektirmeyen kısım tamam (bkz. `DEVICE_COMPATIBILITY.md`); runtime `ArCoreApk_checkAvailability()` + sensör zaman damgası drift testi M6/M2'ye ertelendi (JNI bootstrap olmadan ARCore'un C API'si çağrılamıyor) |
 | M1 | GDExtension iskeleti (Android arm64) | **Tamamlandı** — SCons+godot-cpp+NDK 29 ile derlendi, Godot 4.6.1 export toolchain'i (export template + JDK + debug keystore) kuruldu, A30s'e APK kurulup ping/pong round-trip doğrulandı |
-| M2 | Camera2 geri-düşüş + IMU yakalama | Başlamadı |
-| M3 | AMediaCodec H.264 encode (yerel dosya) | Başlamadı |
-| M4 | Protokol v1 (C++ + Python paralel) | Başlamadı — spesifikasyon hazır (`PROTOCOL.md`) |
+| M2 | Camera2 geri-düşüş yakalama | **Tamamlandı** (IMU örnekleme hariç — henüz eklenmedi) — NDK Camera2, encoder'ın giriş surface'ine doğrudan (sıfır-kopya) yazıyor, A30s'de kanıtlandı |
+| M3 | AMediaCodec H.264 encode (yerel dosya) | **Tamamlandı** — "save"/"stream" seçenekli `OutputSink` mimarisi; `FileSink` A30s'de ~797 kare (14 SPS/PPS+IDR döngüsü, 783 P-frame) geçerli Annex-B akışı üretti, NAL yapısı Python ile doğrulandı; `StreamSink` bilinçli kük (M4/M5) |
+| M4 | Protokol v1 (C++ + Python paralel) | Başlamadı — spesifikasyon hazır (`PROTOCOL.md`), `StreamSink` bunu bekliyor |
+| — | UI: portrait mod, sol-üst overlay, kayıttan bağımsız (async) önizleme | **Tamamlandı** — aynı capture session'ın ikinci (640x360) `AImageReader` çıkışı, yalnız `preview_enabled` iken CPU'da işleniyor; A30s'de kayıt fps'i etkilenmeden (29.5) açılıp kapandığı doğrulandı; gerçek kamera verisi geldiği geçici bir tanılama logu ile sayısal kanıtlandı (ortalama piksel değeri) |
 | M5 | Uçtan uca aynı-LAN akış testi | Başlamadı |
 | M6 | ARCore yakalama yolu (pose/point-cloud/intrinsics) | Başlamadı — gerçek cihaz doğrulaması ARCore-destekli donanım netleşince |
 | M7 | GitHub kalite cila + CI | Başlamadı |

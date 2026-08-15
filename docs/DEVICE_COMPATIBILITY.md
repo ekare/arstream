@@ -36,6 +36,13 @@ Proje planlamasında topluluk kaynaklarına dayanarak "A30s muhtemelen ARCore-se
 ```
 `AMediaCodec` (NDK) üzerinden bu encoder'a erişim M3'te doğrulanacak, ama varlığı kesin.
 
+### Bilinen tutarsızlık — minSdk beyanı vs. gerçek gereksinim (M2/M3'te bulundu)
+
+`H264EncoderAndroid`, sıfır-kopya (Camera→Surface→Encoder) yol için `AMediaCodec_createInputSurface`/`AMediaCodec_signalEndOfInputStream` kullanıyor — bunlar **API 26+** gerektiriyor (derleme `android_api_level=26` ile yapılıyor). Ama şu anki basit (non-Gradle) export yolunda `export_presets.cfg`'nin `gradle_build/min_sdk` alanı **kullanılamıyor** ("Use Gradle Build" kapalıyken Godot bunu reddediyor) — yani üretilen APK'nın manifest'i, Godot'un hazır şablonunun gömülü minSdk'sini (muhtemelen 24) taşımaya devam ediyor. Bu, API 24-25 bir cihazda .so'nun eksik sembollerle çökeceği anlamına gelir; A30s (API 30) için sorun değil ama gerçek dağıtımdan önce çözülmeli:
+- **A seçeneği:** `gradle_build/use_gradle_build=true`'ya geçip minSdk'yi 26'ya doğru beyan et (daha karmaşık build).
+- **B seçeneği:** API 24-25 için `AImageReader`+ByteBuffer tabanlı bir geri-düşüş encoder yolu ekle (daha fazla kod, sıfır-kopya değil).
+Şimdilik dokümante edilen bilinen açık; A30s testleri etkilenmiyor.
+
 ### IMU — **doğrulandı, hız sınırı not edildi**
 
 `dumpsys sensorservice` çıktısı (STM LSM6DSL paketi):
