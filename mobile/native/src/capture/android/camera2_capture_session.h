@@ -27,6 +27,19 @@ public:
 
 	~Camera2CaptureSession();
 
+	// Kamera acilmadan (session baslamadan) BAGIMSIZ calisir -- kendi gecici
+	// ACameraManager'ini acar/kapatir. ArCapture bunu encoder baslamadan ONCE
+	// cagirir, cunku encoder'in ilk SPS/PPS ciktisi (VIDEO_CONFIG'e rotation
+	// bilgisini tasiyacak) camera session'dan once gelebilir.
+	//
+	// ACAMERA_SENSOR_ORIENTATION: sensorun ham ciktisini cihazin dogal
+	// (portrait) yonune getirmek icin SAAT YONUNDE kac derece dondurulmesi
+	// gerektigi -- 0/90/180/270. Cogu telefonda arka kamera icin 90'dir ama
+	// sabit varsayilmaz, cihazdan okunur. Basarisiz olursa 0 doner (dondurme
+	// yok varsayilir -- ekran/kayit yamuk olabilir ama coker/yanlis boyut
+	// vermez).
+	static int32_t query_back_camera_sensor_orientation();
+
 	bool start(ANativeWindow *encoder_surface, int32_t width, int32_t height,
 			int32_t preview_width, int32_t preview_height,
 			ErrorCallback on_error, PreviewFrameCallback on_preview_frame,

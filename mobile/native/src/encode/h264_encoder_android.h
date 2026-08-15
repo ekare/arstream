@@ -26,12 +26,15 @@ public:
 	};
 
 	using ChunkCallback = std::function<void(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe)>;
+	// SPS/PPS (AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) icin AYRI callback --
+	// ChunkCallback'ten farkli olarak sirf govde tasir, keyframe kavrami yok.
+	using ConfigCallback = std::function<void(const uint8_t *sps_pps_annexb, size_t size)>;
 
 	~H264EncoderAndroid();
 
 	// Basarili olursa get_input_surface() dolu doner; Camera2CaptureSession
 	// bunu capture hedefi olarak kullanir.
-	bool start(const Config &cfg, ChunkCallback on_chunk, std::string &out_error);
+	bool start(const Config &cfg, ConfigCallback on_config, ChunkCallback on_chunk, std::string &out_error);
 	void stop();
 
 	ANativeWindow *get_input_surface() const { return input_surface_; }
@@ -42,7 +45,7 @@ private:
 	std::thread drain_thread_;
 	std::atomic<bool> running_{ false };
 
-	void drain_loop(ChunkCallback on_chunk);
+	void drain_loop(ConfigCallback on_config, ChunkCallback on_chunk);
 };
 
 } // namespace arstream

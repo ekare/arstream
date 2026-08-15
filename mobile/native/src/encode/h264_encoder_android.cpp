@@ -9,13 +9,33 @@ namespace {
 // yok, sayisal degeri sabit ve kararli.
 constexpr int32_t COLOR_FORMAT_SURFACE = 0x7f000789;
 constexpr int64_t DEQUEUE_TIMEOUT_US = 10000; // 10ms
+constexpr uint8_t kH264NalTypeIdrSlice = 5;
+
+// AMEDIACODEC_BUFFER_FLAG_KEY_FRAME NDK basligina gore API 34'ten once
+// guvenilir degil (bkz. NdkMediaCodec.h yorumu) -- A30s API 30, o yuzden bu
+// bayraga guvenmek yerine Annex-B NAL tipini (5=IDR) dogrudan kendimiz
+// okuyoruz. Platform/API'den bagimsiz, her zaman dogru.
+bool starts_with_idr_nal(const uint8_t *data, size_t size) {
+	size_t start = 0;
+	if (size >= 4 && data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 1) {
+		start = 4;
+	} else if (size >= 3 && data[0] == 0 && data[1] == 0 && data[2] == 1) {
+		start = 3;
+	} else {
+		return false;
+	}
+	if (start >= size) {
+		return false;
+	}
+	return (data[start] & 0x1F) == kH264NalTypeIdrSlice;
+}
 } // namespace
 
 H264EncoderAndroid::~H264EncoderAndroid() {
 	stop();
 }
 
-bool H264EncoderAndroid::start(const Config &cfg, ChunkCallback on_chunk, std::string &out_error) {
+bool H264EncoderAndroid::start(const Config &cfg, ConfigCallback on_config, ChunkCallback on_chunk, std::string &out_error) {
 	codec_ = AMediaCodec_createEncoderByType("video/avc");
 	if (codec_ == nullptr) {
 		out_error = "video/avc encoder olusturulamadi";
@@ -58,25 +78,27 @@ bool H264EncoderAndroid::start(const Config &cfg, ChunkCallback on_chunk, std::s
 	}
 
 	running_ = true;
-	drain_thread_ = std::thread(&H264EncoderAndroid::drain_loop, this, on_chunk);
+	drain_thread_ = std::thread(&H264EncoderAndroid::drain_loop, this, on_config, on_chunk);
 	return true;
 }
 
-void H264EncoderAndroid::drain_loop(ChunkCallback on_chunk) {
+void H264EncoderAndroid::drain_loop(ConfigCallback on_config, ChunkCallback on_chunk) {
 	while (running_) {
 		AMediaCodecBufferInfo info;
 		ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &info, DEQUEUE_TIMEOUT_US);
 		if (idx >= 0) {
 			size_t out_size = 0;
 			uint8_t *buf = AMediaCodec_getOutputBuffer(codec_, static_cast<size_t>(idx), &out_size);
-			if (buf != nullptr && info.size > 0 && on_chunk) {
-				// CODEC_CONFIG (SPS/PPS) disindaki her cikti, bu yuzeyden-girisli
-				// encoder yapilandirmasinda (I_FRAME_INTERVAL=2s) ya IDR ya da
-				// P-frame'dir; kesin IDR ayrimi (KEY_FRAME flag) protokol
-				// (M4/M5) devreye girince eklenecek -- FileSink bu alani
-				// kullanmiyor, simdilik "codec-config degil" ile yetiniyoruz.
-				bool is_keyframe = (info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) == 0;
-				on_chunk(buf + info.offset, static_cast<size_t>(info.size), info.presentationTimeUs * 1000, is_keyframe);
+			if (buf != nullptr && info.size > 0) {
+				const uint8_t *data = buf + info.offset;
+				size_t size = static_cast<size_t>(info.size);
+				if ((info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) != 0) {
+					if (on_config) {
+						on_config(data, size);
+					}
+				} else if (on_chunk) {
+					on_chunk(data, size, info.presentationTimeUs * 1000, starts_with_idr_nal(data, size));
+				}
 			}
 			AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
 			if ((info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0) {

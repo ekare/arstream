@@ -14,8 +14,9 @@ const CAMERA_PERMISSION := "android.permission.CAMERA"
 @onready var preview_rect: TextureRect = $PreviewRect
 @onready var result_label: Label = $Overlay/ResultLabel
 @onready var mode_button: OptionButton = $Overlay/ModeButton
+@onready var host_port_edit: LineEdit = $Overlay/HostPortEdit
 @onready var capture_button: Button = $Overlay/CaptureButton
-@onready var preview_button: CheckButton = $Overlay/PreviewButton
+@onready var preview_button: CheckButton = $PreviewButton
 @onready var status_label: Label = $Overlay/StatusLabel
 
 var _permission_check_timer: Timer
@@ -37,7 +38,7 @@ func _ready() -> void:
 	ar_capture.connect("capture_error", _on_capture_error)
 
 	mode_button.add_item("Kaydet (dosyaya)", 0)
-	mode_button.add_item("Yayinla (henuz yok)", 1)
+	mode_button.add_item("Yayinla (TCP)", 1)
 
 	_ensure_camera_permission()
 
@@ -91,16 +92,25 @@ func _on_capture_button_pressed() -> void:
 		return
 
 	var mode := "save" if mode_button.selected == 0 else "stream"
-	var output_path := OS.get_user_data_dir().path_join("capture.h264")
 
 	var config := {
 		"mode": mode,
-		"output_path": output_path,
 		"width": 1280,
 		"height": 720,
 		"fps": 30,
 		"bitrate_bps": 4000000,
 	}
+
+	if mode == "save":
+		config["output_path"] = OS.get_user_data_dir().path_join("capture.h264")
+	else:
+		var parts := host_port_edit.text.rsplit(":", false, 1)
+		if parts.size() != 2 or not parts[1].is_valid_int():
+			status_label.text = "HATA: host:port formati gecersiz (%s)" % host_port_edit.text
+			return
+		config["host"] = parts[0]
+		config["port"] = int(parts[1])
+		config["spool_path"] = OS.get_user_data_dir().path_join("stream_spool.bin")
 	status_label.text = "Baslatiliyor (%s)..." % mode
 	ar_capture.start_capture(config)
 

@@ -45,21 +45,37 @@ layout_mode = 2
 [node name="ModeButton" type="OptionButton" parent="Overlay"]
 layout_mode = 2
 
+[node name="HostPortEdit" type="LineEdit" parent="Overlay"]
+layout_mode = 2
+text = "192.168.1.100:9999"
+placeholder_text = "host:port"
+
 [node name="CaptureButton" type="Button" parent="Overlay"]
 layout_mode = 2
 disabled = true
 text = "Yakalamayi baslat"
-
-[node name="PreviewButton" type="CheckButton" parent="Overlay"]
-layout_mode = 2
-disabled = true
-text = "Onizleme"
 
 [node name="StatusLabel" type="Label" parent="Overlay"]
 layout_mode = 2
 text = "Kamera izni bekleniyor..."
 autowrap_mode = 2
 
+[node name="PreviewButton" type="CheckButton" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -110.0
+offset_top = -80.0
+offset_right = 110.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+disabled = true
+text = "Onizleme"
+
 [connection signal="pressed" from="Overlay/PingButton" to="." method="_on_ping_button_pressed"]
 [connection signal="pressed" from="Overlay/CaptureButton" to="." method="_on_capture_button_pressed"]
-[connection signal="toggled" from="Overlay/PreviewButton" to="." method="_on_preview_button_toggled"]
+[connection signal="toggled" from="PreviewButton" to="." method="_on_preview_button_toggled"]

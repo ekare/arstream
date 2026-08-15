@@ -78,6 +78,12 @@ void ArCapture::_update_preview_texture(PackedByteArray p_data, int p_width, int
 
 #ifdef ANDROID_ENABLED
 
+void ArCapture::on_encoder_config(const uint8_t *sps_pps, size_t size) {
+	if (sink_) {
+		sink_->write_video_config(sps_pps, size, sensor_orientation_);
+	}
+}
+
 void ArCapture::on_encoded_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) {
 	if (sink_) {
 		sink_->write_chunk(data, size, timestamp_ns, is_keyframe);
@@ -101,13 +107,47 @@ void ArCapture::on_preview_frame(const uint8_t *y_plane, int32_t width, int32_t 
 	// Bu, kameranin kendi callback thread'inde calisir -- Godot Image/Texture
 	// API'lerine burdan dokunmak guvenli degil, bu yuzden veriyi hemen (row
 	// stride'i dogru hesaba katarak) kopyalayip ana thread'e erteliyoruz.
-	PackedByteArray buf;
-	buf.resize(width * height);
-	uint8_t *dst = buf.ptrw();
-	for (int32_t row = 0; row < height; row++) {
-		memcpy(dst + row * width, y_plane + row * row_stride, width);
+	//
+	// sensor_orientation_ kadar saat yonunde dondurme burada uygulanir --
+	// kamera sensoru fiziksel olarak donuk monte (bkz. ar_capture.h notu),
+	// aksi halde TextureRect'te goruntu yan gorunur. 90/270'te boyutlar
+	// yer degistirir (yatay sensor -> dikey onizleme).
+	int32_t out_width = width;
+	int32_t out_height = height;
+	if (sensor_orientation_ == 90 || sensor_orientation_ == 270) {
+		out_width = height;
+		out_height = width;
 	}
-	call_deferred("_update_preview_texture", buf, width, height);
+
+	PackedByteArray buf;
+	buf.resize(out_width * out_height);
+	uint8_t *dst = buf.ptrw();
+
+	if (sensor_orientation_ == 90) {
+		for (int32_t y = 0; y < out_height; y++) {
+			for (int32_t x = 0; x < out_width; x++) {
+				dst[y * out_width + x] = y_plane[(height - 1 - x) * row_stride + y];
+			}
+		}
+	} else if (sensor_orientation_ == 270) {
+		for (int32_t y = 0; y < out_height; y++) {
+			for (int32_t x = 0; x < out_width; x++) {
+				dst[y * out_width + x] = y_plane[x * row_stride + (width - 1 - y)];
+			}
+		}
+	} else if (sensor_orientation_ == 180) {
+		for (int32_t y = 0; y < out_height; y++) {
+			for (int32_t x = 0; x < out_width; x++) {
+				dst[y * out_width + x] = y_plane[(height - 1 - y) * row_stride + (width - 1 - x)];
+			}
+		}
+	} else {
+		for (int32_t row = 0; row < height; row++) {
+			memcpy(dst + row * width, y_plane + row * row_stride, width);
+		}
+	}
+
+	call_deferred("_update_preview_texture", buf, out_width, out_height);
 }
 
 void ArCapture::set_preview_enabled(bool p_enabled) {
@@ -124,6 +164,9 @@ void ArCapture::start_capture(const Dictionary &p_config) {
 
 	String mode = p_config.get("mode", "save");
 	String output_path = p_config.get("output_path", "");
+	String host = p_config.get("host", "");
+	int port = int(p_config.get("port", 0));
+	String spool_path = p_config.get("spool_path", "");
 
 	arstream::H264EncoderAndroid::Config enc_cfg;
 	enc_cfg.width = int(p_config.get("width", 1280));
@@ -131,31 +174,44 @@ void ArCapture::start_capture(const Dictionary &p_config) {
 	enc_cfg.fps = int(p_config.get("fps", 30));
 	enc_cfg.bitrate_bps = int(p_config.get("bitrate_bps", 4000000));
 
+	// Encoder'dan ONCE sorgulanir -- kendi gecici ACameraManager'ini kullanir,
+	// capture_session_ henuz yokken de calisir (bkz. camera2_capture_session.h).
+	sensor_orientation_ = arstream::Camera2CaptureSession::query_back_camera_sensor_orientation();
+
 	preview_width_ = MAX(enc_cfg.width / 2, 160);
 	preview_height_ = MAX(enc_cfg.height / 2, 90);
-	// Onceki capture'dan farkli boyutta kalmis olabilecek dokuyu birak ki
-	// get_preview_texture() yeni boyutla yeniden olustursun.
-	preview_texture_.unref();
+	// DIKKAT: preview_texture_ burada unref/yeniden olusturulmuyor -- GDScript
+	// (Main.gd) _ready()'de get_preview_texture()'i BIR KEZ cagirip TextureRect'e
+	// atiyor; ayni Ref<ImageTexture> objesini kalici olarak tutuyor. Burada
+	// unref() cagirmak ArCapture'in kendi referansini birakir ama TextureRect'in
+	// elindeki (artik "yetim") objeyi degistirmez -- ekran hep bos/siyah kalir,
+	// veri BASKA bir objeye yazilir. Boyut degisikligi _update_preview_texture()
+	// icindeki set_image() ile AYNI obje uzerinde, yerinde yapiliyor zaten.
 
 	std::string err;
 
 	encoder_ = std::make_unique<arstream::H264EncoderAndroid>();
+	auto config_cb = [this](const uint8_t *data, size_t size) {
+		on_encoder_config(data, size);
+	};
 	auto chunk_cb = [this](const uint8_t *data, size_t size, int64_t ts, bool key) {
 		on_encoded_chunk(data, size, ts, key);
 	};
-	if (!encoder_->start(enc_cfg, chunk_cb, err)) {
+	if (!encoder_->start(enc_cfg, config_cb, chunk_cb, err)) {
 		emit_signal("capture_error", String("Encoder baslatilamadi: ") + String(err.c_str()));
 		encoder_.reset();
 		return;
 	}
 
+	std::string dest;
 	if (mode == "save") {
 		sink_ = std::make_unique<arstream::FileSink>();
+		dest = std::string(output_path.utf8().get_data());
 	} else {
-		sink_ = std::make_unique<arstream::StreamSink>();
+		sink_ = std::make_unique<arstream::StreamSink>(std::string(spool_path.utf8().get_data()));
+		dest = std::string(host.utf8().get_data()) + ":" + std::to_string(port);
 	}
 
-	std::string dest = std::string(output_path.utf8().get_data());
 	if (!sink_->open(dest, err)) {
 		emit_signal("capture_error", String(err.c_str()));
 		encoder_->stop();

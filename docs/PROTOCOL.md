@@ -108,7 +108,9 @@ Bu ofset yalnız **mutlak** zaman hizalaması/loglama içindir — `VIDEO_CHUNK`
 
 **`0x05 VIDEO_CONFIG`** (client→server) — `HELLO_ACK` sonrası bir kez, ve her reconnect'te veya orta-akış yeniden yapılandırmada tekrar gönderilir.
 
-Payload: `uint16 json_len` + UTF-8 JSON (`codec, profile, width, height, fps, bitrate_kbps`) + ham SPS/PPS NAL byte'ları (Annex-B, start-code dahil).
+Payload: `uint16 json_len` + UTF-8 JSON (`codec, profile, width, height, fps, bitrate_kbps, rotation`) + ham SPS/PPS NAL byte'ları (Annex-B, start-code dahil).
+
+`rotation` (int, derece — 0/90/180/270): kamera sensörünün `ACAMERA_SENSOR_ORIENTATION` değeri. Kare verisinin **kendisi** hiç döndürülmez (encoder'ın sıfır-kopya, Surface-girişli hattı bozulmasın diye) — bu yalnız metadata, alıcı taraf kareyi göstermeden önce bu kadar saat yönünde döndürmeli. Standart video konteynerlerinin (MP4 "rotation matrix" vb.) çözdüğü sorunun aynısı, aynı yöntemle: piksel değil metadata döner.
 
 **`0x10 VIDEO_CHUNK`** (client→server) — her video karesi için bir tane.
 
@@ -161,13 +163,13 @@ istemci bağlanır (TCP connect)
 
 `protocol_version` her başlıkta taşınır. Aynı major sürüm = tel-uyumlu. Bilinmeyen `msg_type`'lar §2'deki kuralla güvenle atlanabildiğinden, aynı-major bir istemci/sunucu çifti yeni mesaj tipleri eklense bile birbirini kilitlemez.
 
-**Planlanan v2 (henüz yok, `docs/ROADMAP.md`):** UDP/QUIC veya WebRTC-data-channel taşıma — yalnız *taşımayı* değiştirir, yukarıdaki mesaj sözlüğünü/semantiğini değiştirmez.
+**Planlanan v2 (henüz yok, `docs/ROADMAP.md`):** UDP taşıma + hafif/hızlı bir şifreleme şeması (tam TLS değil — düşük gecikmeli bir el sıkışma + AEAD, örn. ChaCha20-Poly1305; QUIC de bu ikisini bir arada çözen bir alternatif) — yalnız *taşımayı* değiştirir, yukarıdaki mesaj sözlüğünü/semantiğini değiştirmez. `sequence_number` alanı zaten bunun için ayrıldı.
 
 ---
 
 ## 6. Güvenlik — bilinçli v1 sınırı
 
-v1'de TLS yok, kimlik doğrulama yok. Varsayım: istemci ve sunucu güvenilir bir ağda (aynı LAN, veya VPN/tünel arkasında). İnternet üzerinden kullanım gerekiyorsa önerilen yol protokole özel kripto eklemek değil, **WireGuard/Tailscale/SSH port-forward gibi bir tünel** kurmaktır — bu, "sade" tasarım tercihiyle ve ağ topolojisinin dağıtım katmanında çözülmesi gerektiği kararıyla tutarlıdır.
+v1'de TLS yok, kimlik doğrulama yok. Varsayım: istemci ve sunucu güvenilir bir ağda (aynı LAN, veya VPN/tünel arkasında). İnternet üzerinden kullanım gerekiyorsa v1 için önerilen yol protokole özel kripto eklemek değil, **WireGuard/Tailscale/SSH port-forward gibi bir tünel** kurmaktır — bu, "sade" tasarım tercihiyle ve ağ topolojisinin dağıtım katmanında çözülmesi gerektiği kararıyla tutarlıdır. v2'de (bkz. §5) bu sınır UDP taşımasıyla birlikte hafif bir şifreleme katmanıyla ele alınması planlanıyor — tasarımı henüz yapılmadı.
 
 ---
 

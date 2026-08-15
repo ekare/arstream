@@ -2,7 +2,7 @@
 
 Bir mobil uygulama (Godot, Android önce/iOS sonra), ARCore ile kamera görüntüsü ve IMU verisini yakalar, gerçek zamanlı olarak donanım H.264 encoder'ıyla sıkıştırır ve tek bir TCP bağlantısı üzerinden özel, versiyonlanmış bir ikili protokolle bir "destination" sunucusuna akıtır. Depo ayrıca bu protokolü konuşan bir Python referans sunucusu içerir — protokolün hem çalışan bir örneği hem de yaşayan dokümantasyonu.
 
-Native (kamera yakalama, encode, ağ) tarafı **GDExtension (C/C++)** ile yazılıyor — Kotlin/Swift'te iş mantığı yok; aynı C++ kod tabanı platforma göre derlenir. İki dar istisna, ikisi de mantık değil yalnızca köprü: (1) Android'de Godot'un GDExtension'ı JNIEnv/Activity context'ine resmi bir yolla veremediği için (bkz. [godot-proposals #6734](https://github.com/godotengine/godot-proposals/issues/6734)) ARCore'u başlatabilmek amacıyla ~20 satırlık, sıfır iş-mantığı içeren bir Kotlin "bootstrap shim" kullanılıyor — tek işi bu iki pointer'ı native tarafa iletmek; ARCore'un tüm gerçek mantığı (`arcore_c_api.h` ile) C++'ta kalıyor. (2) iOS'ta ARKit/AVFoundation/CoreMotion'ın C API'si olmadığından ince bir Objective-C++ köprüsü gerekecek (henüz inşa edilmedi — bkz. Yol Haritası).
+Native (kamera yakalama, encode, ağ) tarafı **GDExtension (C/C++)** ile yazılıyor — Kotlin/Swift'te iş mantığı yok; aynı C++ kod tabanı platforma göre derlenir. Protokol, `StreamSink`/`StreamClient` (bellek-önce/disk-taşma dayanıklı gönderim) ve dosya sink'i tamamen platform-bağımsız, iOS dahil değişmeden kullanılacak. İki dar istisna, ikisi de mantık değil yalnızca köprü: (1) Android'de Godot'un GDExtension'ı JNIEnv/Activity context'ine resmi bir yolla veremediği için (bkz. [godot-proposals #6734](https://github.com/godotengine/godot-proposals/issues/6734)) ARCore'u başlatabilmek amacıyla ~20 satırlık, sıfır iş-mantığı içeren bir Kotlin "bootstrap shim" kullanılıyor. (2) iOS'ta ARKit/AVFoundation/CoreMotion'ın C API'si olmadığından ince bir Objective-C++ köprüsü gerekecek — bu ihtiyaç Android'deki JNI sorununu bile taşımıyor, Obj-C++ context aktarımı olmadan doğrudan çağrı yapabiliyor (henüz inşa edilmedi, Mac gerekiyor — bkz. [`docs/IOS_HANDOVER.md`](docs/IOS_HANDOVER.md)).
 
 ## Mimari
 
@@ -20,7 +20,7 @@ ARCore, tüm Android cihazlarda çalışmaz (Android 7.0+ VE Google'ın sertifik
 
 ## Durum
 
-M1–M4 tamamlandı: Camera2 → `AMediaCodec` H.264 (sıfır-kopya, Surface-girişli) → dosyaya kayıt, A30s'de gerçek çekimle doğrulandı (~30fps, geçerli Annex-B çıktı); kayıttan bağımsız açılıp kapanabilen önizleme; kablo protokolü v1'in C++ ve Python implementasyonları `fixtures/*.bin` golden-byte dosyalarına karşı test edildi. Henüz yok: gerçek TCP bağlantısı (`StreamSink`/sunucu tarafı kuk — M5), ARCore yolu (M6). İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+M1–M5 tamamlandı: Camera2 → `AMediaCodec` H.264 (sıfır-kopya) → **gerçek TCP akışı**, A30s'den laptop'a aynı WiFi LAN'da uçtan uca test edildi. `StreamSink`'in bellek-önce/disk-taşma tamponu gerçek bir ağ kopmasında (~25sn) doğrulandı: bellek dolup diske taştı, bağlantı dönünce sırayı bozmadan tam boşaldı, sıfır kayıp. Kayıttan bağımsız açılıp kapanabilen önizleme; kablo protokolünün C++/Python implementasyonları `fixtures/*.bin`'e karşı test edildi. Henüz yok: HELLO/HELLO_ACK el sıkışması, ARCore yolu (M6). İlerleme: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Hızlı başlangıç
 
@@ -49,7 +49,12 @@ godot --headless --path mobile --export-debug "Android" ../build/arstream-debug.
 adb install -r build/arstream-debug.apk
 ```
 
-`server/` referans alıcısı (asyncio sunucu, `arstream-server` CLI) henüz M5'te yazılacak; şu an yalnız `arstream_server.protocol` modülü (protokolün Python implementasyonu) var.
+```bash
+# referans sunucu (M5'te yazıldı, protokolü konuşan asyncio sunucu)
+cd server && pip install -e . && arstream-server --host 0.0.0.0 --port 9999 --out ./captures
+```
+
+iOS tarafı henüz yok (Mac gerekiyor) — nereden başlanacağı için [`docs/IOS_HANDOVER.md`](docs/IOS_HANDOVER.md).
 
 ## Test
 

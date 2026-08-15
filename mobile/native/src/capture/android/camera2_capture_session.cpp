@@ -108,6 +108,49 @@ std::string Camera2CaptureSession::find_back_camera_id() {
 	return result;
 }
 
+int32_t Camera2CaptureSession::query_back_camera_sensor_orientation() {
+	ACameraManager *manager = ACameraManager_create();
+	if (manager == nullptr) {
+		return 0;
+	}
+	ACameraIdList *id_list = nullptr;
+	if (ACameraManager_getCameraIdList(manager, &id_list) != ACAMERA_OK || id_list == nullptr) {
+		ACameraManager_delete(manager);
+		return 0;
+	}
+
+	int32_t orientation = 0;
+	int32_t fallback_orientation = 0;
+	bool found_back = false;
+	for (int i = 0; i < id_list->numCameras; i++) {
+		const char *id = id_list->cameraIds[i];
+		ACameraMetadata *metadata = nullptr;
+		if (ACameraManager_getCameraCharacteristics(manager, id, &metadata) != ACAMERA_OK || metadata == nullptr) {
+			continue;
+		}
+		int32_t this_orientation = 0;
+		ACameraMetadata_const_entry orientation_entry;
+		if (ACameraMetadata_getConstEntry(metadata, ACAMERA_SENSOR_ORIENTATION, &orientation_entry) == ACAMERA_OK && orientation_entry.count > 0) {
+			this_orientation = orientation_entry.data.i32[0];
+		}
+		if (i == 0) {
+			fallback_orientation = this_orientation;
+		}
+		ACameraMetadata_const_entry facing_entry;
+		if (ACameraMetadata_getConstEntry(metadata, ACAMERA_LENS_FACING, &facing_entry) == ACAMERA_OK && facing_entry.count > 0 && facing_entry.data.u8[0] == ACAMERA_LENS_FACING_BACK) {
+			orientation = this_orientation;
+			found_back = true;
+			ACameraMetadata_free(metadata);
+			break;
+		}
+		ACameraMetadata_free(metadata);
+	}
+
+	ACameraManager_deleteCameraIdList(id_list);
+	ACameraManager_delete(manager);
+	return found_back ? orientation : fallback_orientation;
+}
+
 bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width, int32_t height,
 		int32_t preview_width, int32_t preview_height,
 		ErrorCallback on_error, PreviewFrameCallback on_preview_frame,

@@ -43,8 +43,12 @@ public:
 	// M1 duman testi: GDScript -> native -> sinyal round-trip'i kanitlar.
 	void ping(const String &p_message);
 
-	// M2/M3: yakalama + encode + kayit/stream.
-	// config: {mode: "save"|"stream", output_path: String, width/height/fps/bitrate_bps: int}
+	// M2/M3/M5: yakalama + encode + kayit/stream.
+	// config: {mode: "save"|"stream",
+	//          output_path: String,              -- yalniz save
+	//          host: String, port: int,           -- yalniz stream
+	//          spool_path: String,                -- yalniz stream: bellek dolunca tasan disk dosyasi
+	//          width/height/fps/bitrate_bps: int}
 	void start_capture(const Dictionary &p_config);
 	void stop_capture();
 
@@ -66,6 +70,14 @@ private:
 	int64_t stat_bytes_ = 0;
 	std::chrono::steady_clock::time_point stat_start_time_;
 
+	// ACAMERA_SENSOR_ORIENTATION -- kamera sensoru fiziksel olarak cihazin
+	// dogal yonune gore donuk monte edilir (cogu telefonda 90 derece).
+	// start_capture()'da encoder'dan ONCE sorgulanir (bkz. camera2_capture_
+	// session.h "query_back_camera_sensor_orientation" notu), hem onizlemeyi
+	// dogru cevirmek hem VIDEO_CONFIG metadata'sina koymak icin kullanilir.
+	int32_t sensor_orientation_ = 0;
+
+	void on_encoder_config(const uint8_t *sps_pps, size_t size);
 	void on_encoded_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe);
 	void on_capture_error(const std::string &message);
 	void on_preview_frame(const uint8_t *y_plane, int32_t width, int32_t height, int32_t row_stride);
