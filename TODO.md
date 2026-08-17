@@ -19,7 +19,7 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 - [x] `.github/workflows/server-python.yml` -- Python 3.11/3.12 matrix, `pytest`. (No `ruff`/`mypy`: neither is configured anywhere in the repo yet, so adding a CI gate for them now would just fail on unlinted pre-existing code -- separate follow-up if wanted.)
 - [x] `.github/workflows/native-build.yml` -- `scons platform=android arch=arm64 target=template_debug` build check + host-native `protocol_test` build+run. Found and fixed a real Linux-only bug in the process: godot-cpp's `tools/android.py` doesn't wrap the `ar` invocation in a response file the way `tools/web.py` already does for `emar`, so linking `libgodot-cpp....a` overflowed Linux's `ARG_MAX` ("Argument list too long") -- never hit on Windows, which is why local builds never caught it. Fixed from our own top-level `mobile/native/SConstruct` (not the submodule) via the same `TempFileMunge` pattern `web.py` uses. Also hardened `fetch_arcore_sdk.ps1` with retry/backoff after hitting a transient 429 from `raw.githubusercontent.com` on a CI runner.
-- [ ] Tag `v0.1.0` once CI is green on a clean clone -- CI is green (`ci/m7-github-actions` branch, run #4); not yet tagged, ask before doing so.
+- [x] Tag `v0.1.0` once CI is green on a clean clone -- done.
 
 ## Protocol / server gaps
 
