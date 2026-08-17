@@ -228,6 +228,23 @@ bool Camera2CaptureSession::start(ANativeWindow *encoder_surface, int32_t width,
 		stop();
 		return false;
 	}
+
+	// Fixed focus, no OIS, no digital (EIS) stabilization -- applied to
+	// BOTH TEMPLATE_RECORD and TEMPLATE_PREVIEW (preview included), so the
+	// intrinsics/geometry any downstream consumer sees never shift mid-
+	// stream. A moving/refocusing lens or a warping-crop stabilizer breaks
+	// the fixed-camera assumption this whole project is built on. 0.0f
+	// diopters is the device-independent convention for infinity focus --
+	// the right default for room/environment-scale capture (not macro).
+	uint8_t af_mode_off = ACAMERA_CONTROL_AF_MODE_OFF;
+	ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AF_MODE, 1, &af_mode_off);
+	float focus_distance_infinity = 0.0f;
+	ACaptureRequest_setEntry_float(request_, ACAMERA_LENS_FOCUS_DISTANCE, 1, &focus_distance_infinity);
+	uint8_t ois_off = ACAMERA_LENS_OPTICAL_STABILIZATION_MODE_OFF;
+	ACaptureRequest_setEntry_u8(request_, ACAMERA_LENS_OPTICAL_STABILIZATION_MODE, 1, &ois_off);
+	uint8_t video_stab_off = ACAMERA_CONTROL_VIDEO_STABILIZATION_MODE_OFF;
+	ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_VIDEO_STABILIZATION_MODE, 1, &video_stab_off);
+
 	if (encoder_target_ != nullptr) {
 		ACaptureRequest_addTarget(request_, encoder_target_);
 	}

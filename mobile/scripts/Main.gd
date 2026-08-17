@@ -17,6 +17,7 @@ const CAMERA_PERMISSION := "android.permission.CAMERA"
 
 @onready var preview_rect: TextureRect = $PreviewRect
 @onready var result_label: Label = $Overlay/ResultLabel
+@onready var arcore_label: Label = $Overlay/ArCoreLabel
 @onready var mode_button: OptionButton = $Overlay/ModeButton
 @onready var host_port_edit: LineEdit = $Overlay/HostPortEdit
 @onready var capture_button: Button = $Overlay/CaptureButton
@@ -41,11 +42,21 @@ func _ready() -> void:
 	ar_capture.connect("capture_stopped", _on_capture_stopped)
 	ar_capture.connect("stats_updated", _on_stats_updated)
 	ar_capture.connect("capture_error", _on_capture_error)
+	ar_capture.connect("arcore_availability_checked", _on_arcore_availability_checked)
 
 	mode_button.add_item("Record (to file)", 0)
 	mode_button.add_item("Stream (TCP)", 1)
 
 	_ensure_camera_permission()
+
+	# Faz B gate (ARCore availability) is NOT triggered from here: it must
+	# run on Android's actual UI thread (ArCoreApk_checkAvailabilityAsync
+	# aborts otherwise, observed on-device), which this GDScript callback
+	# is not guaranteed to be. JniBootstrapPlugin.kt's
+	# onGodotMainLoopStarted() triggers it directly instead, right after
+	# handing the JNI context over -- see ar_capture.cpp's
+	# nativeCheckArcoreAvailability. The result still arrives here via the
+	# arcore_availability_checked signal connected above.
 
 
 func _ensure_camera_permission() -> void:
@@ -157,3 +168,8 @@ func _on_stats_updated(frames_encoded: int, bytes_written: int, fps: float) -> v
 
 func _on_capture_error(message: String) -> void:
 	status_label.text = "ERROR: " + message
+
+
+func _on_arcore_availability_checked(availability: String) -> void:
+	arcore_label.text = "ARCore: " + availability
+	print("ARCore availability: ", availability)

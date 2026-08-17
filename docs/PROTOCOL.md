@@ -118,16 +118,34 @@ Payload: `int64 capture_timestamp_ns` (8) + `uint8 flags` (1, bit0=keyframe) + a
 
 Default keyframe interval is **2 seconds** (~60 frames @ 30fps), negotiable in `VIDEO_CONFIG`.
 
-### 3.4 IMU
+### 3.4 Sensors (IMU and beyond)
 
 **`0x20 IMU_BATCH`** (client→server) — sent batched every ~50–100ms (NOT per frame).
 
 Payload: `uint16 sample_count` + `sample_count` repetitions of:
 | Field | Type |
 |---|---|
-| `sensor_type` | `uint8` (`0`=accelerometer, `1`=gyroscope) |
+| `sensor_type` | `uint8` — an Android `ASENSOR_TYPE_*` constant, NOT limited to accelerometer/gyroscope. The client sends whatever sensors the device actually has. |
 | `timestamp_ns` | `int64` |
-| `x, y, z` | `float32` × 3 |
+| `x, y, z` | `float32` × 3 — for scalar sensors (temperature, pressure, light, humidity, proximity) only `x` is meaningful, `y`/`z` are `0`. |
+
+Common `sensor_type` values (Android NDK `<android/sensor.h>`):
+
+| Value | Sensor | Axes |
+|---|---|---|
+| 1 | Accelerometer | x,y,z (m/s²) |
+| 2 | Magnetic field | x,y,z (µT) |
+| 4 | Gyroscope | x,y,z (rad/s) |
+| 5 | Light | x only (lx) |
+| 6 | Pressure | x only (hPa) |
+| 8 | Proximity | x only (cm) |
+| 9 | Gravity | x,y,z (m/s²) |
+| 10 | Linear acceleration | x,y,z (m/s²) |
+| 11 | Rotation vector | x,y,z |
+| 12 | Relative humidity | x only (%) |
+| 13 | Ambient temperature | x only (°C) |
+
+This list isn't exhaustive — any `ASENSOR_TYPE_*` the device reports may appear. A receiver that doesn't recognize a `sensor_type` value should just store/ignore it rather than reject the batch.
 
 ### 3.5 Optional ARCore fields
 

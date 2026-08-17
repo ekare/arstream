@@ -46,7 +46,7 @@ or as a module: `python -m arstream_server.cli` (same arguments).
 | `--port` | `9999` | Ingest server port |
 | `--web-host` | `0.0.0.0` | Address the dashboard listens on |
 | `--web-port` | `8080` | Dashboard port — reach it from a browser at `http://<machine-ip>:8080` |
-| `--out` | `./captures` | Directory recordings are written to (`captures/<session_id>/video.h264` + `meta.json`) |
+| `--out` | `./captures` | Directory recordings are written to (`captures/<session_id>/video.h264`, `frames.jsonl`, `imu.jsonl`, `poses.jsonl`, `points.jsonl`, `intrinsics.json`, `meta.json` — see [Recorded files](#recorded-files)) |
 | `--plugins-dir` | (none) | Directory containing additional external plugins — see [Writing a plugin](#writing-a-plugin) |
 
 On startup:
@@ -88,17 +88,60 @@ The PID file, log file, and venv locations can be overridden with the `ARSTREAM_
 | `GET /` | HTTP | The dashboard HTML page |
 | `GET /api/sessions` | HTTP | `{"sessions": [...]}` — all sessions (live + past), with their latest state |
 | `GET /api/sessions/{id}` | HTTP | A single session's detail, `404` if not found |
-| `GET /api/sessions/{id}/download` | HTTP | A `.zip` of `captures/<id>/`'s contents (`video.h264` + `meta.json`), packaged on the fly in memory (no `.zip` is written to disk) |
+| `GET /api/sessions/{id}/download` | HTTP | A `.zip` of `captures/<id>/`'s entire contents (see [Recorded files](#recorded-files)), packaged on the fly in memory (no `.zip` is written to disk) |
 | `WS /ws/live` | WebSocket | `{"type": "session_start"\|"session_update"\|"session_end", "session": {...}}` events — the dashboard's live tables listen to this |
 
 ## Architecture — why plugin-based
 
-The ingest server (`ingest.py`) decodes the protocol but does **nothing** with the incoming data itself — it dispatches every event (`session_start`, `video_config`, `video_chunk`, `session_end`) to a `PluginManager`. Two built-in plugins consume this:
+The ingest server (`ingest.py`) decodes the protocol but does **nothing** with the incoming data itself — it dispatches every event (`session_start`, `video_config`, `video_chunk`, `imu_batch`, `pose_sample`, `point_cloud`, `camera_intrinsics`, `session_end`) to a `PluginManager`. Two built-in plugins consume this:
 
-- **`RecorderPlugin`** (`plugins/recorder.py`) — writes each session to disk (`video.h264` as an Annex-B stream, `meta.json` with the latest stats).
+- **`RecorderPlugin`** (`plugins/recorder.py`) — writes each session to disk. See [Recorded files](#recorded-files) below.
 - **`StatsPlugin`** (`plugins/stats.py`) — updates frame/byte counters and publishes periodic events to the dashboard's WebSocket via `EventBus` (every 15 frames, plus `session_start`/`session_end`).
 
 An exception raised by one plugin never stops the other plugins or the ingest itself — `PluginManager` wraps every call in its own `try/except`, logs the error, and keeps the stream going.
+
+### Recorded files
+
+`RecorderPlugin` writes each session to `captures/<session_id>/`. Nothing is muxed into the video bitstream — every file shares the phone's raw device-clock (`timestamp_ns`) domain, so they can be correlated by timestamp (see `docs/PROTOCOL.md` §0):
+
+| File | Format | Contents |
+|---|---|---|
+| `video.h264` | raw Annex-B | SPS/PPS + frames, concatenated in wire order |
+| `frames.jsonl` | JSON lines | one line per `VIDEO_CHUNK`: `{timestamp_ns, is_keyframe, byte_offset, size}` — `byte_offset`/`size` index into `video.h264`, so a specific frame's bytes can be sliced out without decoding the whole stream |
+| `imu.jsonl` | JSON lines | one line per sensor sample (batches are flattened): `{sensor_type, timestamp_ns, x, y, z}` — see `docs/PROTOCOL.md` §3.4 for what `sensor_type` can be (not just accelerometer/gyroscope) |
+| `poses.jsonl` | JSON lines | one line per `POSE_SAMPLE` (ARCore only): `{timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw}` |
+| `points.jsonl` | JSON lines | one line per `POINT_CLOUD` message (ARCore only): `{timestamp_ns, points: [[x,y,z,confidence], ...]}` |
+| `intrinsics.json` | JSON snapshot | latest `CAMERA_INTRINSICS` (ARCore only): `{fx, fy, cx, cy, width, height}` — overwritten on change, not append-only |
+| `meta.json` | JSON snapshot | `Session.to_dict()` — same shape as the `/api/sessions/{id}` response |
+
+### Reading a downloaded capture
+
+The `.zip` from `GET /api/sessions/{id}/download` needs no special tooling to consume — every file is either raw Annex-B H.264 or line-delimited JSON, all sharing the phone's device-clock `timestamp_ns` domain so they can be correlated by timestamp alone (`docs/PROTOCOL.md` §0). A minimal worked example — list every keyframe's byte range in `video.h264`, then find the pose closest in time to the first one:
+
+```python
+import json
+import zipfile
+
+with zipfile.ZipFile("session.zip") as zf:
+    video_bytes = zf.read("video.h264")
+    frames = [json.loads(line) for line in zf.read("frames.jsonl").decode().splitlines()]
+    poses = [json.loads(line) for line in zf.read("poses.jsonl").decode().splitlines()]  # ARCore only, may be empty
+
+keyframes = [f for f in frames if f["is_keyframe"]]
+print(f"{len(keyframes)} keyframes out of {len(frames)} frames")
+
+# Slice out the first keyframe's raw NAL bytes without decoding the whole stream:
+first_kf = keyframes[0]
+nal_bytes = video_bytes[first_kf["byte_offset"] : first_kf["byte_offset"] + first_kf["size"]]
+
+# Nearest pose sample by timestamp (poses.jsonl may be empty if the session used the
+# Camera2 fallback backend instead of ARCore -- see docs/DEVICE_COMPATIBILITY.md):
+if poses:
+    nearest = min(poses, key=lambda p: abs(p["timestamp_ns"] - first_kf["timestamp_ns"]))
+    print("pose nearest first keyframe:", nearest)
+```
+
+To decode actual pixels instead of just slicing NAL bytes, feed `video.h264` (or the full concatenated stream) to any Annex-B-aware decoder — e.g. PyAV (`av.open("video.h264")`, iterate `container.decode(video=0)`) or `ffmpeg -i video.h264 out.mp4`. `intrinsics.json` (present for ARCore sessions) gives the pinhole camera model (`fx, fy, cx, cy, width, height`) needed to unproject `points.jsonl`'s 3D points or reproject them into the frame.
 
 ### Writing a plugin
 
@@ -139,6 +182,10 @@ Every `.py` file under `--plugins-dir` (except ones starting with an underscore)
 | `on_session_start(session)` | When a new TCP connection opens | `session: Session` |
 | `on_video_config(session, config, sps_pps)` | When a `VIDEO_CONFIG` message arrives (once per connection + every reconnect) | `config: dict` (codec/size/fps/rotation), `sps_pps: bytes` (Annex-B) |
 | `on_video_chunk(session, timestamp_ns, is_keyframe, nal)` | On every `VIDEO_CHUNK` | `timestamp_ns: int`, `is_keyframe: bool`, `nal: bytes` (Annex-B) |
+| `on_imu_batch(session, samples)` | On every `IMU_BATCH` | `samples: list[protocol.ImuSample]` (`sensor_type, timestamp_ns, x, y, z`) |
+| `on_pose_sample(session, timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw)` | On every `POSE_SAMPLE` (ARCore only) | all `float` except `timestamp_ns: int`, `tracking_state: int` |
+| `on_point_cloud(session, timestamp_ns, points)` | On every `POINT_CLOUD` (ARCore only) | `timestamp_ns: int`, `points: list[protocol.Point]` (`x, y, z, confidence`) |
+| `on_camera_intrinsics(session, fx, fy, cx, cy, width, height)` | On every `CAMERA_INTRINSICS` (ARCore only) | `fx, fy, cx, cy: float`, `width, height: int` |
 | `on_session_end(session)` | When the connection closes (`session.ended_at` is already set by then) | `session: Session` |
 
 `Session` fields: `id`, `peer_address`, `started_at`, `ended_at`, `video_config`, `rotation_degrees`, `frame_count`, `keyframe_count`, `byte_count`, `fps` — full list in `session.py`.
@@ -169,7 +216,7 @@ server/
     ingest.py             # TCP ingest server, decodes the protocol and dispatches to PluginManager
     plugins/
       __init__.py          # StreamPlugin base class, PluginManager, load_plugins_from_dir
-      recorder.py            # built-in: writes to disk
+      recorder.py            # built-in: writes video.h264 + frames/imu/poses/points.jsonl + intrinsics/meta.json
       stats.py                # built-in: counters + WebSocket publishing
     web/
       app.py                  # FastAPI app -- /api/*, /ws/live

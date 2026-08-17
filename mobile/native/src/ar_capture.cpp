@@ -6,6 +6,7 @@
 #ifdef ANDROID_ENABLED
 #include "sink/file_sink.h"
 #include "sink/stream_sink.h"
+#include <jni.h>
 #endif
 
 using namespace godot;
@@ -23,10 +24,16 @@ void ArCapture::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_preview_enabled", "enabled"), &ArCapture::set_preview_enabled);
 	ClassDB::bind_method(D_METHOD("_update_preview_texture", "data", "width", "height"), &ArCapture::_update_preview_texture);
 
+	// check_arcore_availability is NOT bound to GDScript -- it must run on
+	// Android's UI thread (see nativeCheckArcoreAvailability below),
+	// which GDScript callers can't guarantee. It's only ever invoked
+	// internally, from the JNI trampoline.
+
 	ADD_SIGNAL(MethodInfo("capture_started"));
 	ADD_SIGNAL(MethodInfo("capture_stopped", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("stats_updated", PropertyInfo(Variant::INT, "frames_encoded"), PropertyInfo(Variant::INT, "bytes_written"), PropertyInfo(Variant::FLOAT, "fps")));
 	ADD_SIGNAL(MethodInfo("capture_error", PropertyInfo(Variant::STRING, "message")));
+	ADD_SIGNAL(MethodInfo("arcore_availability_checked", PropertyInfo(Variant::STRING, "availability")));
 }
 
 ArCapture *ArCapture::get_singleton() {
@@ -103,6 +110,37 @@ void ArCapture::on_capture_error(const std::string &message) {
 	call_deferred("emit_signal", "capture_error", String(message.c_str()));
 }
 
+void ArCapture::on_sensor_batch(const std::vector<arstream::protocol::ImuSample> &samples) {
+	// Fires from SensorSampler's OWN background thread -- unlike preview
+	// frames, this never touches Godot Image/Texture APIs, so no
+	// call_deferred is needed; sink_->write_imu_batch() is already safe to
+	// call from any thread (see sensor_sampler.h).
+	if (sink_) {
+		sink_->write_imu_batch(samples);
+	}
+}
+
+void ArCapture::on_pose_sample(int64_t timestamp_ns, uint8_t tracking_state, float x, float y, float z, float qx, float qy, float qz, float qw) {
+	// Fires from ArCoreCaptureSession's own render thread -- same
+	// no-call_deferred-needed reasoning as on_sensor_batch above: only
+	// touches sink_, never Godot Image/Texture APIs.
+	if (sink_) {
+		sink_->write_pose_sample(timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw);
+	}
+}
+
+void ArCapture::on_point_cloud(int64_t timestamp_ns, const std::vector<arstream::protocol::Point> &points) {
+	if (sink_) {
+		sink_->write_point_cloud(timestamp_ns, points);
+	}
+}
+
+void ArCapture::on_camera_intrinsics(float fx, float fy, float cx, float cy, uint32_t width, uint32_t height) {
+	if (sink_) {
+		sink_->write_camera_intrinsics(fx, fy, cx, cy, width, height);
+	}
+}
+
 void ArCapture::on_preview_frame(const uint8_t *y_plane, int32_t width, int32_t height, int32_t row_stride) {
 	// This runs on the camera's own callback thread -- touching Godot's
 	// Image/Texture APIs from here isn't safe, so we copy the data right away
@@ -154,8 +192,8 @@ void ArCapture::set_preview_enabled(bool p_enabled) {
 	if (capturing_) {
 		// While recording/streaming: preview already shares the encoder's
 		// session, just flip the flag -- no need to reopen the camera.
-		if (capture_session_) {
-			capture_session_->set_preview_enabled(p_enabled);
+		if (capture_controller_) {
+			capture_controller_->set_preview_enabled(p_enabled);
 		}
 		return;
 	}
@@ -164,35 +202,49 @@ void ArCapture::set_preview_enabled(bool p_enabled) {
 	// encoder-less camera session. This lets the user watch the live feed
 	// before starting a recording, or after stopping one.
 	if (!p_enabled) {
-		if (capture_session_) {
-			capture_session_->stop();
-			capture_session_.reset();
+		if (capture_controller_) {
+			capture_controller_->stop();
+			capture_controller_.reset();
 		}
 		return;
 	}
 
-	if (capture_session_) {
+	if (capture_controller_) {
 		// A preview-only session is already open -- just flip the flag on.
-		capture_session_->set_preview_enabled(true);
+		capture_controller_->set_preview_enabled(true);
 		return;
 	}
 
-	sensor_orientation_ = arstream::Camera2CaptureSession::query_back_camera_sensor_orientation();
+	sensor_orientation_ = arstream::CaptureController::query_back_camera_sensor_orientation();
 
 	std::string err;
-	capture_session_ = std::make_unique<arstream::Camera2CaptureSession>();
+	capture_controller_ = std::make_unique<arstream::CaptureController>();
 	auto error_cb = [this](const std::string &message) {
 		on_capture_error(message);
 	};
 	auto preview_cb = [this](const uint8_t *y, int32_t w, int32_t h, int32_t stride) {
 		on_preview_frame(y, w, h, stride);
 	};
-	if (!capture_session_->start(nullptr, 0, 0, preview_width_, preview_height_, error_cb, preview_cb, err)) {
+	auto pose_cb = [this](int64_t ts, uint8_t state, float x, float y, float z, float qx, float qy, float qz, float qw) {
+		on_pose_sample(ts, state, x, y, z, qx, qy, qz, qw);
+	};
+	auto point_cloud_cb = [this](int64_t ts, const std::vector<arstream::protocol::Point> &points) {
+		on_point_cloud(ts, points);
+	};
+	auto intrinsics_cb = [this](float fx, float fy, float cx, float cy, uint32_t w, uint32_t h) {
+		on_camera_intrinsics(fx, fy, cx, cy, w, h);
+	};
+	if (!capture_controller_->start(nullptr, 0, 0, preview_width_, preview_height_, error_cb, preview_cb,
+				pose_cb, point_cloud_cb, intrinsics_cb, err)) {
 		emit_signal("capture_error", String("Could not start preview: ") + String(err.c_str()));
-		capture_session_.reset();
+		capture_controller_.reset();
 		return;
 	}
-	capture_session_->set_preview_enabled(true);
+	if (capture_controller_->active_backend() == arstream::CaptureController::Backend::kArCore) {
+		// See the note on sensor_orientation_ in ar_capture.h.
+		sensor_orientation_ = 0;
+	}
+	capture_controller_->set_preview_enabled(true);
 }
 
 void ArCapture::start_capture(const Dictionary &p_config) {
@@ -219,15 +271,15 @@ void ArCapture::start_capture(const Dictionary &p_config) {
 	// closed before opening the real (encoder-backed) session. Whether
 	// preview was on is remembered, and turned back on below on the new session.
 	bool preview_was_enabled = false;
-	if (capture_session_) {
-		preview_was_enabled = capture_session_->is_preview_enabled();
-		capture_session_->stop();
-		capture_session_.reset();
+	if (capture_controller_) {
+		preview_was_enabled = capture_controller_->is_preview_enabled();
+		capture_controller_->stop();
+		capture_controller_.reset();
 	}
 
 	// Queried BEFORE the encoder -- uses its own temporary ACameraManager,
-	// works even while capture_session_ doesn't exist yet (see camera2_capture_session.h).
-	sensor_orientation_ = arstream::Camera2CaptureSession::query_back_camera_sensor_orientation();
+	// works even while capture_controller_ doesn't exist yet (see capture_controller.h).
+	sensor_orientation_ = arstream::CaptureController::query_back_camera_sensor_orientation();
 
 	preview_width_ = MAX(enc_cfg.width / 2, 160);
 	preview_height_ = MAX(enc_cfg.height / 2, 90);
@@ -272,26 +324,53 @@ void ArCapture::start_capture(const Dictionary &p_config) {
 		return;
 	}
 
-	capture_session_ = std::make_unique<arstream::Camera2CaptureSession>();
+	capture_controller_ = std::make_unique<arstream::CaptureController>();
 	auto error_cb = [this](const std::string &message) {
 		on_capture_error(message);
 	};
 	auto preview_cb = [this](const uint8_t *y, int32_t w, int32_t h, int32_t stride) {
 		on_preview_frame(y, w, h, stride);
 	};
-	if (!capture_session_->start(encoder_->get_input_surface(), enc_cfg.width, enc_cfg.height,
-				preview_width_, preview_height_, error_cb, preview_cb, err)) {
+	auto pose_cb = [this](int64_t ts, uint8_t state, float x, float y, float z, float qx, float qy, float qz, float qw) {
+		on_pose_sample(ts, state, x, y, z, qx, qy, qz, qw);
+	};
+	auto point_cloud_cb = [this](int64_t ts, const std::vector<arstream::protocol::Point> &points) {
+		on_point_cloud(ts, points);
+	};
+	auto intrinsics_cb = [this](float fx, float fy, float cx, float cy, uint32_t w, uint32_t h) {
+		on_camera_intrinsics(fx, fy, cx, cy, w, h);
+	};
+	if (!capture_controller_->start(encoder_->get_input_surface(), enc_cfg.width, enc_cfg.height,
+				preview_width_, preview_height_, error_cb, preview_cb,
+				pose_cb, point_cloud_cb, intrinsics_cb, err)) {
 		emit_signal("capture_error", String("Could not start camera: ") + String(err.c_str()));
 		sink_->close();
 		sink_.reset();
 		encoder_->stop();
 		encoder_.reset();
-		capture_session_.reset();
+		capture_controller_.reset();
 		return;
+	}
+	if (capture_controller_->active_backend() == arstream::CaptureController::Backend::kArCore) {
+		// See the note on sensor_orientation_ in ar_capture.h.
+		sensor_orientation_ = 0;
 	}
 
 	if (preview_was_enabled) {
-		capture_session_->set_preview_enabled(true);
+		capture_controller_->set_preview_enabled(true);
+	}
+
+	// Independent of the camera backend -- sensors are their own subsystem.
+	// A failure here (e.g. no usable sensors on this device) is surfaced but
+	// non-fatal to the capture itself; video must not be blocked by it.
+	sensor_sampler_ = std::make_unique<arstream::SensorSampler>();
+	auto sensor_batch_cb = [this](const std::vector<arstream::protocol::ImuSample> &samples) {
+		on_sensor_batch(samples);
+	};
+	std::string sensor_err;
+	if (!sensor_sampler_->start(sensor_batch_cb, sensor_err)) {
+		emit_signal("capture_error", String("Could not start sensor sampling: ") + String(sensor_err.c_str()));
+		sensor_sampler_.reset();
 	}
 
 	stat_frames_ = 0;
@@ -307,9 +386,13 @@ void ArCapture::stop_capture() {
 	}
 	capturing_ = false;
 
-	if (capture_session_) {
-		capture_session_->stop();
-		capture_session_.reset();
+	if (sensor_sampler_) {
+		sensor_sampler_->stop();
+		sensor_sampler_.reset();
+	}
+	if (capture_controller_) {
+		capture_controller_->stop();
+		capture_controller_.reset();
 	}
 	if (encoder_) {
 		encoder_->stop();
@@ -321,6 +404,30 @@ void ArCapture::stop_capture() {
 	}
 
 	emit_signal("capture_stopped", "stopped");
+}
+
+void ArCapture::check_arcore_availability() {
+	arstream::arcore_availability::check_async([this](const std::string &availability) {
+		call_deferred("emit_signal", "arcore_availability_checked", String(availability.c_str()));
+	});
+}
+
+// JNI trampoline for JniBootstrapPlugin.kt's `external fun
+// nativeCheckArcoreAvailability`, called from inside an
+// Activity.runOnUiThread{} block in onGodotMainLoopStarted() -- i.e. on
+// Android's actual UI thread, which arcore_availability::check_async()
+// requires (see its comment). onGodotMainLoopStarted() itself runs on
+// Godot's own engine thread ("VkThread"), NOT the UI thread, despite
+// looking like an Activity lifecycle callback -- confirmed on-device by a
+// SIGABRT when the ARCore call was made directly from there. GDScript
+// does NOT call check_arcore_availability() directly for the same reason
+// -- Godot's render/game thread isn't the UI thread either.
+extern "C" JNIEXPORT void JNICALL
+Java_com_arstream_jnibootstrap_JniBootstrapPlugin_nativeCheckArcoreAvailability(JNIEnv * /*env*/, jobject /*thiz*/) {
+	ArCapture *ac = ArCapture::get_singleton();
+	if (ac != nullptr) {
+		ac->check_arcore_availability();
+	}
 }
 
 #else // !ANDROID_ENABLED
@@ -335,6 +442,10 @@ void ArCapture::stop_capture() {
 
 void ArCapture::set_preview_enabled(bool p_enabled) {
 	(void)p_enabled;
+}
+
+void ArCapture::check_arcore_availability() {
+	emit_signal("arcore_availability_checked", "UNKNOWN_ERROR");
 }
 
 #endif

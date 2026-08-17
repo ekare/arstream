@@ -20,11 +20,32 @@ mobile/native/tests/protocol_test.exp
 mobile/native/tests/protocol_test.lib
 mobile/native/tests/protocol_test.pdb
 
-# --- Android NDK / Gradle leftovers (toolchain only; the project does NOT use Kotlin/Gradle) ---
+# --- Android NDK / Gradle leftovers ---
+# Godot's own installed Gradle Android build template (Project > Install
+# Android Build Template...) -- regenerable, not hand-edited. .build_version
+# is a small sibling marker the same editor action writes (just the Godot
+# version string) -- ignored alongside build/ since a marker with no
+# matching template content would be meaningless clutter.
+mobile/android/build/
+mobile/android/.build_version
+# The jni_bootstrap plugin's own Gradle module build output (its *source*
+# -- build.gradle.kts, src/, gradlew -- IS committed; only output is not).
+# Its built .aar IS committed too, under mobile/addons/jni_bootstrap/bin/,
+# since Godot's export step expects it pre-built and does not run Gradle
+# for it itself.
+mobile/android/plugins/*/build/
+mobile/android/plugins/*/.gradle/
+mobile/android/plugins/*/local.properties
 .gradle/
 local.properties
 *.apk
 *.aab
+
+# --- ARCore SDK (vendored via mobile/thirdparty/fetch_arcore_sdk.ps1) ---
+# Carries Google's own ARCore Additional Terms of Service, not this
+# project's license -- never committed, fetched fresh per clone/CI run.
+mobile/thirdparty/arcore/
+mobile/android/plugins/jni_bootstrap/src/main/jniLibs/
 
 # --- iOS / Xcode (future) ---
 *.xcodeproj/

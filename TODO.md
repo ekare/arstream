@@ -9,12 +9,11 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - [ ] Double-check no local-only paths, IPs, or credentials are hardcoded anywhere (`192.168.1.100:9999` in `mobile/scenes/Main.tscn` is a placeholder default, not a secret -- fine to ship).
 - [ ] Add a repo description/topics on GitHub once created (Godot, GDExtension, ARCore, Android, H.264, streaming).
 
-## M6 -- ARCore capture path
+## M6 follow-ups -- ARCore capture path (core path done, see `docs/ROADMAP.md`)
 
-- [ ] `capture/android/arcore_capture_session.cpp/.h` -- `ArSession`/`ArFrame` via `arcore_c_api.h`.
-- [ ] The Kotlin JNI-bootstrap shim (`mobile/android/plugins/jni_bootstrap/JniBootstrapPlugin.kt`) -- approved in design, not yet built. Needed only for `JNIEnv*`/`Activity` handoff to `ArSession_create`; zero ARCore logic in the Kotlin file itself (see `docs/ARCHITECTURE.md` "JNI bootstrap exception").
-- [ ] `POSE_SAMPLE`/`POINT_CLOUD`/`CAMERA_INTRINSICS` messages wired end-to-end from ARCore into the protocol (encode/decode already exist on both sides, only the producer is missing).
-- [ ] Real-device verification once ARCore-supported hardware is confirmed (see `docs/DEVICE_COMPATIBILITY.md` -- the A30s looks promising but `ArCoreApk_checkAvailability()` hasn't actually been called yet).
+- [ ] Real hand-held recording (phone actually moved by a person, not just ADB automation) to confirm: (a) `points.jsonl` populates once there's camera parallax for ARCore's sparse point cloud to track (came back empty in the stationary-phone device test -- expected given no motion, but not distinguished from a bug), (b) frame orientation is visually correct (the automated test's camera was pointed at a dim, texture-poor surface, inconclusive).
+- [ ] `mobile/addons/jni_bootstrap/bin/release/*.aar` -- built once (`./gradlew assembleRelease` in `mobile/android/plugins/jni_bootstrap/`) but never exercised through a `--export-release` build; only the debug path has been verified end-to-end on-device.
+- [ ] `ArCoreCaptureSession` doesn't yet read the encoder's target fps into `ArCameraConfigFilter_setTargetFps` -- currently accepts whatever fps ARCore's matched camera config reports, not confirmed to equal the encoder's requested fps.
 
 ## M7 -- GitHub-quality polish + CI
 
@@ -30,6 +29,5 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Known gaps (documented, not urgent)
 
-- [ ] Android `minSdk` mismatch: the encoder needs API 26+, but the current non-Gradle export path can't declare that in the manifest (see `docs/DEVICE_COMPATIBILITY.md`). Not an issue for the A30s (API 30); needs `gradle_build/use_gradle_build=true` or a ByteBuffer fallback encoder before shipping to older devices.
 - [ ] iOS support -- blocked on acquiring a Mac. Full handover doc ready at `docs/IOS_HANDOVER.md`.
 - [ ] v2 transport (UDP + lightweight encryption) -- not designed yet, see `docs/ROADMAP.md`.

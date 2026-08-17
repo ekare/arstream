@@ -39,7 +39,7 @@ def create_app(ctx: AppContext) -> FastAPI:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return JSONResponse(session.to_dict())
 
-    @app.get("/api/sessions/{session_id}/download", summary="Download the session as a .zip containing video.h264 + meta.json")
+    @app.get("/api/sessions/{session_id}/download", summary="Download the session as a .zip (video.h264, frames/imu/poses/points.jsonl, intrinsics.json, meta.json)")
     async def download_session(session_id: str):
         session_dir = ctx.captures_dir / session_id
         if not session_dir.is_dir():

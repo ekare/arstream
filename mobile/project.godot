@@ -18,6 +18,10 @@ config/features=PackedStringArray("4.6", "Mobile")
 
 window/handheld/orientation=1
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/jni_bootstrap/plugin.cfg")
+
 [native_extensions]
 
 paths=["res://arcapture.gdextension"]

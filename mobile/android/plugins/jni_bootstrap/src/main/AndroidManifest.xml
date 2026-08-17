@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Registers this plugin with Godot's Android runtime. The value
+             is the fully-qualified Kotlin class Godot instantiates at
+             startup. See docs/ARCHITECTURE.md, "JNI bootstrap exception". -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.JniBootstrap"
+            android:value="com.arstream.jnibootstrap.JniBootstrapPlugin" />
+
+        <!-- ARCore is optional. ArCoreApk_checkAvailability() decides at
+             runtime whether to use it (CaptureController falls back to
+             Camera2 if not SUPPORTED_INSTALLED, see docs/ARCHITECTURE.md).
+             Without this meta-data ARCore's own SDK code aborted
+             (SIGABRT inside ArCoreApk_checkAvailabilityAsync, confirmed
+             on-device) rather than failing gracefully. -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
+    </application>
+</manifest>

@@ -24,6 +24,18 @@ class _RecordingPlugin(StreamPlugin):
     async def on_video_chunk(self, session, timestamp_ns, is_keyframe, nal):
         self.calls.append("chunk")
 
+    async def on_imu_batch(self, session, samples):
+        self.calls.append("imu_batch")
+
+    async def on_pose_sample(self, session, timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw):
+        self.calls.append("pose_sample")
+
+    async def on_point_cloud(self, session, timestamp_ns, points):
+        self.calls.append("point_cloud")
+
+    async def on_camera_intrinsics(self, session, fx, fy, cx, cy, width, height):
+        self.calls.append("camera_intrinsics")
+
     async def on_session_end(self, session):
         self.calls.append("end")
 
@@ -47,8 +59,14 @@ async def test_dispatch_calls_every_plugin_hook(session):
     await pm.dispatch_session_start(session)
     await pm.dispatch_video_config(session, {}, b"")
     await pm.dispatch_video_chunk(session, 0, False, b"")
+    await pm.dispatch_imu_batch(session, [])
+    await pm.dispatch_pose_sample(session, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    await pm.dispatch_point_cloud(session, 0, [])
+    await pm.dispatch_camera_intrinsics(session, 0.0, 0.0, 0.0, 0.0, 0, 0)
     await pm.dispatch_session_end(session)
-    assert p.calls == ["start", "config", "chunk", "end"]
+    assert p.calls == [
+        "start", "config", "chunk", "imu_batch", "pose_sample", "point_cloud", "camera_intrinsics", "end",
+    ]
 
 
 @pytest.mark.asyncio

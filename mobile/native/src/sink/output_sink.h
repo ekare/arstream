@@ -1,13 +1,17 @@
 #pragma once
 
+#include "../net/protocol.h"
+
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace arstream {
 
-// Where encoded Annex-B H.264 data goes. "save" and "stream" modes are two
-// implementations of this interface -- ArCapture picks which one to use
-// based on the "mode" field in the config.
+// Where encoded Annex-B H.264 data (and, alongside it, sensor telemetry)
+// goes. "save" and "stream" modes are two implementations of this
+// interface -- ArCapture picks which one to use based on the "mode" field
+// in the config.
 class OutputSink {
 public:
 	virtual ~OutputSink() = default;
@@ -29,6 +33,22 @@ public:
 	// do -- rotate the metadata, not the pixels.
 	virtual void write_video_config(const uint8_t *sps_pps_annexb, size_t size, int32_t rotation_degrees) = 0;
 	virtual void write_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) = 0;
+
+	// A batch of sensor readings (see SensorSampler) -- an independent
+	// stream from the video, correlated only by sharing the same device
+	// clock domain (docs/PROTOCOL.md §0), never muxed into the H264 data.
+	virtual void write_imu_batch(const std::vector<protocol::ImuSample> &samples) = 0;
+
+	// ARCore-only (see ArCoreCaptureSession) -- no-op source when the
+	// Camera2 backend is active, these virtuals just never get called.
+	// tracking_state is ArCore's ArTrackingState (0=TRACKING, 1=PAUSED,
+	// 2=STOPPED); qx/qy/qz/qw + x/y/z match ArPose_getPoseRaw's order.
+	virtual void write_pose_sample(int64_t timestamp_ns, uint8_t tracking_state, float x, float y, float z, float qx, float qy, float qz, float qw) = 0;
+	virtual void write_point_cloud(int64_t timestamp_ns, const std::vector<protocol::Point> &points) = 0;
+	// Reported once per session (fixed focus, fixed config -- intrinsics
+	// don't change frame to frame), not per-frame like the other writes.
+	virtual void write_camera_intrinsics(float fx, float fy, float cx, float cy, uint32_t width, uint32_t height) = 0;
+
 	virtual void close() = 0;
 };
 

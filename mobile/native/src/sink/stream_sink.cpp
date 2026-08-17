@@ -46,6 +46,10 @@ bool StreamSink::open(const std::string &destination, std::string &out_error) {
 	spool_write_pos_ = 0;
 	video_config_seq_ = 1;
 	video_chunk_seq_ = 1;
+	imu_batch_seq_ = 1;
+	pose_sample_seq_ = 1;
+	point_cloud_seq_ = 1;
+	camera_intrinsics_seq_ = 1;
 
 	running_ = true;
 	sender_thread_ = std::thread(&StreamSink::sender_loop, this);
@@ -73,6 +77,25 @@ void StreamSink::write_video_config(const uint8_t *sps_pps_annexb, size_t size, 
 
 void StreamSink::write_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) {
 	enqueue(protocol::encode_video_chunk(video_chunk_seq_++, timestamp_ns, is_keyframe, data, size));
+}
+
+void StreamSink::write_imu_batch(const std::vector<protocol::ImuSample> &samples) {
+	// Same FIFO queue as video chunks -- no separate queueing logic needed,
+	// enqueue() already handles memory-first/disk-overflow generically for
+	// any encoded message.
+	enqueue(protocol::encode_imu_batch(imu_batch_seq_++, samples));
+}
+
+void StreamSink::write_pose_sample(int64_t timestamp_ns, uint8_t tracking_state, float x, float y, float z, float qx, float qy, float qz, float qw) {
+	enqueue(protocol::encode_pose_sample(pose_sample_seq_++, timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw));
+}
+
+void StreamSink::write_point_cloud(int64_t timestamp_ns, const std::vector<protocol::Point> &points) {
+	enqueue(protocol::encode_point_cloud(point_cloud_seq_++, timestamp_ns, points));
+}
+
+void StreamSink::write_camera_intrinsics(float fx, float fy, float cx, float cy, uint32_t width, uint32_t height) {
+	enqueue(protocol::encode_camera_intrinsics(camera_intrinsics_seq_++, fx, fy, cx, cy, width, height));
 }
 
 void StreamSink::enqueue(std::vector<uint8_t> message) {

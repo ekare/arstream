@@ -13,8 +13,24 @@ sources += Glob("src/net/*.cpp")
 if env["platform"] == "android":
     sources += Glob("src/capture/android/*.cpp")
     sources += Glob("src/encode/*android*.cpp")
-    # NDK Camera2 + Media (AMediaCodec) -- pure C APIs, no Kotlin/JNI needed.
+    sources += Glob("src/sensors/android/*.cpp")
+    sources += Glob("src/platform/android/*.cpp")
+    # NDK Camera2 + Media (AMediaCodec) + Sensor -- pure C APIs. The lone
+    # exception is platform/android/android_context.cpp, the single JNI
+    # bootstrap entry point (see mobile/android/plugins/jni_bootstrap/) --
+    # no extra LIBS needed, JNI symbols resolve through the JavaVM*/JNIEnv*
+    # function pointers handed in at runtime, not link-time.
     env.Append(LIBS=["camera2ndk", "mediandk", "android"])
+    # ARCore's C API (arcore_c_api.h + libarcore_sdk_c.so) is not part of
+    # the NDK -- vendored via mobile/thirdparty/fetch_arcore_sdk.ps1, see
+    # that script's header comment for why it isn't committed to git.
+    env.Append(CPPPATH=["../thirdparty/arcore/include"])
+    env.Append(LIBPATH=["../thirdparty/arcore/jni/arm64-v8a"])
+    env.Append(LIBS=["arcore_sdk_c"])
+    # EGL/GLESv2 -- gl_blit_renderer.cpp draws ARCore's
+    # GL_TEXTURE_EXTERNAL_OES camera texture into the encoder's Surface
+    # (ARCore has no zero-copy Surface-write path the way Camera2 does).
+    env.Append(LIBS=["EGL", "GLESv2"])
 elif env["platform"] == "ios":
     sources += Glob("src/capture/ios/*.mm")
     sources += Glob("src/encode/*ios*.cpp")

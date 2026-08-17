@@ -23,6 +23,12 @@ namespace arstream {
 // of recording/streaming it can also be opened for preview ONLY, with
 // encoder_surface=nullptr (see ArCapture::set_preview_enabled) -- single
 // target, TEMPLATE_PREVIEW.
+//
+// Autofocus, OIS, and digital (EIS) video stabilization are fixed OFF by
+// policy for every request this class builds (see start()) -- not
+// configurable, on purpose. A moving/refocusing lens or a warping-crop
+// stabilizer breaks the fixed-intrinsics assumption downstream consumers
+// (VIO/SLAM-style) depend on.
 class Camera2CaptureSession {
 public:
 	using ErrorCallback = std::function<void(const std::string &message)>;

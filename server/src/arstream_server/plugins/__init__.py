@@ -12,6 +12,7 @@ import inspect
 import logging
 from pathlib import Path
 
+from .. import protocol
 from ..session import Session
 
 logger = logging.getLogger("arstream_server.plugins")
@@ -30,6 +31,32 @@ class StreamPlugin:
         pass
 
     async def on_video_chunk(self, session: Session, timestamp_ns: int, is_keyframe: bool, nal: bytes) -> None:
+        pass
+
+    async def on_imu_batch(self, session: Session, samples: list[protocol.ImuSample]) -> None:
+        pass
+
+    async def on_pose_sample(
+        self,
+        session: Session,
+        timestamp_ns: int,
+        tracking_state: int,
+        x: float,
+        y: float,
+        z: float,
+        qx: float,
+        qy: float,
+        qz: float,
+        qw: float,
+    ) -> None:
+        pass
+
+    async def on_point_cloud(self, session: Session, timestamp_ns: int, points: list[protocol.Point]) -> None:
+        pass
+
+    async def on_camera_intrinsics(
+        self, session: Session, fx: float, fy: float, cx: float, cy: float, width: int, height: int
+    ) -> None:
         pass
 
     async def on_session_end(self, session: Session) -> None:
@@ -58,6 +85,36 @@ class PluginManager:
     async def dispatch_video_chunk(self, session: Session, timestamp_ns: int, is_keyframe: bool, nal: bytes) -> None:
         for p in self._plugins:
             await self._call_safely(p, p.on_video_chunk(session, timestamp_ns, is_keyframe, nal))
+
+    async def dispatch_imu_batch(self, session: Session, samples: list[protocol.ImuSample]) -> None:
+        for p in self._plugins:
+            await self._call_safely(p, p.on_imu_batch(session, samples))
+
+    async def dispatch_pose_sample(
+        self,
+        session: Session,
+        timestamp_ns: int,
+        tracking_state: int,
+        x: float,
+        y: float,
+        z: float,
+        qx: float,
+        qy: float,
+        qz: float,
+        qw: float,
+    ) -> None:
+        for p in self._plugins:
+            await self._call_safely(p, p.on_pose_sample(session, timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw))
+
+    async def dispatch_point_cloud(self, session: Session, timestamp_ns: int, points: list[protocol.Point]) -> None:
+        for p in self._plugins:
+            await self._call_safely(p, p.on_point_cloud(session, timestamp_ns, points))
+
+    async def dispatch_camera_intrinsics(
+        self, session: Session, fx: float, fy: float, cx: float, cy: float, width: int, height: int
+    ) -> None:
+        for p in self._plugins:
+            await self._call_safely(p, p.on_camera_intrinsics(session, fx, fy, cx, cy, width, height))
 
     async def dispatch_session_end(self, session: Session) -> None:
         for p in self._plugins:

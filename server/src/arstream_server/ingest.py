@@ -70,6 +70,18 @@ class ClientSession:
         elif mt == protocol.MsgType.VIDEO_CHUNK:
             ts, is_key, nal = protocol.decode_video_chunk(msg.payload)
             await pm.dispatch_video_chunk(self.session, ts, is_key, nal)
+        elif mt == protocol.MsgType.IMU_BATCH:
+            samples = protocol.decode_imu_batch(msg.payload)
+            await pm.dispatch_imu_batch(self.session, samples)
+        elif mt == protocol.MsgType.POSE_SAMPLE:
+            ts, tracking_state, x, y, z, qx, qy, qz, qw = protocol.decode_pose_sample(msg.payload)
+            await pm.dispatch_pose_sample(self.session, ts, tracking_state, x, y, z, qx, qy, qz, qw)
+        elif mt == protocol.MsgType.POINT_CLOUD:
+            ts, points = protocol.decode_point_cloud(msg.payload)
+            await pm.dispatch_point_cloud(self.session, ts, points)
+        elif mt == protocol.MsgType.CAMERA_INTRINSICS:
+            fx, fy, cx, cy, width, height = protocol.decode_camera_intrinsics(msg.payload)
+            await pm.dispatch_camera_intrinsics(self.session, fx, fy, cx, cy, width, height)
         else:
             logger.info("unhandled msg_type=0x%02x, %d bytes", mt, len(msg.payload))
 

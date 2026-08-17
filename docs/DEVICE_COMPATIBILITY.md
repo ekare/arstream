@@ -15,17 +15,17 @@ This document tracks which devices the ARCore/Camera2/IMU capture paths have bee
 | CPU ABI | arm64-v8a (also compatible with armeabi-v7a, armeabi) |
 | Chipset | Exynos 7904 (`universal7904`) |
 
-### ARCore status — **more optimistic than expected**
+### ARCore status — **`SUPPORTED_INSTALLED`, confirmed at runtime (M6)**
 
-Project planning started from the assumption, based on community sources, that "the A30s is probably not on ARCore's certified-device list" (the plain A30 was reported as listed, the A30s was not). Direct device inspection **doesn't support this**:
+Project planning started from the assumption, based on community sources, that "the A30s is probably not on ARCore's certified-device list" (the plain A30 was reported as listed, the A30s was not). Passive inspection (M0, before any app code existed) already pointed the other way — `com.google.ar.core` installed (`1.54.260890083`), Play Services current, Play Store present — and the **actual runtime call settles it**:
 
-- `com.google.ar.core` (Google Play Services for AR) **is installed**, version `1.54.260890083` (`minSdk=29, targetSdk=36`) — recently updated.
-- Google Play Services (`com.google.android.gms`) is current: `26.30.32`.
-- The Play Store (`com.android.vending`) is present.
+```
+ArCoreApk_checkAvailabilityAsync() → SUPPORTED_INSTALLED
+```
 
-**Interpretation:** The package being present and the Play Store actively pushing updates to the device is a strong signal that the device hasn't been entirely filtered out by Google's eligibility checks — but it's **not conclusive proof** (the ARCore package could also be installed manually/sideloaded). **The definitive answer only comes from `ArCoreApk_checkAvailability()`'s actual runtime result** — the first thing to verify once the GDExtension skeleton is up in M1.
+Called from `arcore_availability.cpp`, triggered once at app startup via the JNI bootstrap plugin (see `ARCHITECTURE.md`'s "JNI bootstrap exception"). The community assumption was wrong for this specific unit — the A30s runs the full ARCore path, not just the Camera2 fallback.
 
-**Conclusion:** M0's earlier assumption of "the ARCore path will probably not be testable on this device" has been relaxed — there's a good chance the ARCore path can be tested on this device too. `CaptureController` is still being built to support both paths (ARCore + Camera2 fallback) with a runtime decision; this finding doesn't change the architecture, only the expectation of which path gets verified first.
+**End-to-end capture verified with the ARCore backend forced** (`adb shell setprop debug.arstream.capture_backend arcore`): 900 frames @ 29.4fps real-time H.264 through `ArCoreCaptureSession`'s GL blit pipeline, `poses.jsonl` showing a realistic `PAUSED`→`TRACKING` transition, `intrinsics.json` reporting sane values after `ArSession_setCameraConfig` was added to match the encoder's aspect ratio (ARCore's own default camera config was 640×480/4:3 against a 1280×720/16:9 encoder target — stretched the image until fixed, see `ROADMAP.md`'s M6 section). **Not yet verified by a human physically holding/moving the phone** — the test above was driven entirely over ADB with the phone stationary on a desk, which is consistent with (but doesn't prove) two open items: `points.jsonl` came back empty (ARCore's sparse feature point cloud needs camera parallax to populate, which a stationary phone can't provide), and frame orientation wasn't conclusively confirmed visually (the camera was pointed at a dim, texture-poor surface). A real hand-held recording is the next verification step for these two specifically.
 
 ### Hardware H.264 (AVC) encoder — **verified**
 
@@ -36,16 +36,13 @@ In `/vendor/etc/media_codecs.xml`:
 ```
 Actually accessing this encoder via `AMediaCodec` (NDK) will be verified in M3, but its presence is confirmed.
 
-### Known inconsistency — declared minSdk vs. actual requirement (found in M2/M3)
+### Known inconsistency — declared minSdk vs. actual requirement — **resolved in M6**
 
-`H264EncoderAndroid` uses `AMediaCodec_createInputSurface`/`AMediaCodec_signalEndOfInputStream` for the zero-copy (Camera→Surface→Encoder) path — these require **API 26+** (the build uses `android_api_level=26`). But in the current simple (non-Gradle) export path, `export_presets.cfg`'s `gradle_build/min_sdk` field **can't be used** (Godot rejects it while "Use Gradle Build" is off) — meaning the generated APK's manifest still carries Godot's stock template's embedded minSdk (likely 24). This means the `.so` would crash with missing symbols on an API 24-25 device; not an issue for the A30s (API 30), but needs to be resolved before real distribution:
-- **Option A:** switch to `gradle_build/use_gradle_build=true` and declare minSdk as 26 (more complex build).
-- **Option B:** add an `AImageReader`+ByteBuffer-based fallback encoder path for API 24-25 (more code, not zero-copy).
-For now this is a documented known gap; it doesn't affect A30s testing.
+`H264EncoderAndroid` uses `AMediaCodec_createInputSurface`/`AMediaCodec_signalEndOfInputStream` for the zero-copy (Camera→Surface→Encoder) path — these require **API 26+** (the build uses `android_api_level=26`). The original (non-Gradle) export path couldn't declare this in the manifest at all; M6's move to `gradle_build/use_gradle_build=true` (required anyway, for the JNI bootstrap Android plugin) came with `gradle_build/min_sdk="26"`, closing this gap as a side effect. No longer an open item.
 
-### IMU — **verified, rate limit noted**
+### Sensors — **verified end-to-end (SensorSampler, all sensor types, both save and stream modes)**
 
-`dumpsys sensorservice` output (STM LSM6DSL package):
+`dumpsys sensorservice` output (STM LSM6DSL package) for the core IMU pair:
 
 | Sensor | Driver | Mode | Rate range |
 |---|---|---|---|
@@ -53,9 +50,11 @@ For now this is a documented known gap; it doesn't affect A30s testing.
 | Gyroscope | LSM6DSL | continuous, non-wakeUp, no batching | 5.00–100.00 Hz |
 | Gyroscope (uncalibrated) | LSM6DSL | same | same |
 
-**Note:** A max of 100Hz is lower than the 200–400Hz gyro on some higher-end devices, but usable for VIO-style purposes. `SENSOR_DELAY_GAME` will in practice correspond to ~100Hz on this device. `ImuSampler` needs to be written to read the rate from the device via `ASensor_getMinDelay()` rather than assuming a fixed target rate — consistent with the no-magic-numbers rule.
+**Note:** A max of 100Hz is lower than the 200–400Hz gyro on some higher-end devices, but usable for VIO-style purposes. `SENSOR_DELAY_GAME` corresponds to ~100Hz on this device. `SensorSampler` reads the actual rate per-sensor via `ASensor_getMinDelay()` rather than assuming a fixed target — consistent with the no-magic-numbers rule.
 
-**Not yet verified (requires code, to be handled in M1/M2):** epoch/drift consistency between `SensorEvent.timestamp` and `SystemClock.elapsedRealtimeNanos()` — can't be measured via passive ADB inspection, needs to be tested with actual sampling code.
+**Full sensor enumeration (real device test, `SensorSampler`, both `save`-mode `.imu.jsonl` and `stream`-mode against `server/`):** this device reports **16 distinct sensor types**, not just accelerometer/gyroscope: `1` accelerometer, `2` magnetic field, `3` orientation (legacy), `4` gyroscope, `5` light, `8` proximity, `9` gravity, `10` linear acceleration, `11` rotation vector, `14` magnetic field (uncalibrated), `15` game rotation vector, `16` gyroscope (uncalibrated), `24` (vendor/likely pose-related, only fires a few times), `51`/`65`/`80` (Exynos/Samsung vendor-private sensor IDs, outside the standard `ASENSOR_TYPE_*` range but still captured generically — no allowlist needed). No dedicated ambient-temperature sensor on this particular device (hardware fact, not a code gap). Scalar sensors (light, proximity) correctly report only `x`, with `y=z=0` as documented in `docs/PROTOCOL.md` §3.4. At rest: gyroscope ≈0 rad/s on all axes (confirms no spurious motion), accelerometer magnitude ≈9.5 m/s² (device held at a slight tilt, not flat — consistent with 9.8 m/s² at 0° tilt).
+
+**Clock domain — verified, `REALTIME`:** `adb shell dumpsys media.camera` reports `android.sensor.info.timestampSource: REALTIME` for the back camera. Combined with the API 26+ CDD guarantee that `ASensorEvent.timestamp` is `SystemClock.elapsedRealtimeNanos()`-based, this confirms `VIDEO_CHUNK`'s `capture_timestamp_ns` and `IMU_BATCH`'s per-sample `timestamp_ns` are on the **same clock domain** on this device — `docs/PROTOCOL.md` §0's "same device clock domain" design assumption holds here. (On a device reporting `UNKNOWN` instead, this would need empirical calibration — e.g. correlating a deliberate sharp shake's peak in both streams — rather than being assumed.)
 
 ---
 

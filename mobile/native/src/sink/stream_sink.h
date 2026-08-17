@@ -39,6 +39,10 @@ public:
 	bool open(const std::string &destination, std::string &out_error) override; // destination = "host:port"
 	void write_video_config(const uint8_t *sps_pps_annexb, size_t size, int32_t rotation_degrees) override;
 	void write_chunk(const uint8_t *data, size_t size, int64_t timestamp_ns, bool is_keyframe) override;
+	void write_imu_batch(const std::vector<protocol::ImuSample> &samples) override;
+	void write_pose_sample(int64_t timestamp_ns, uint8_t tracking_state, float x, float y, float z, float qx, float qy, float qz, float qw) override;
+	void write_point_cloud(int64_t timestamp_ns, const std::vector<protocol::Point> &points) override;
+	void write_camera_intrinsics(float fx, float fy, float cx, float cy, uint32_t width, uint32_t height) override;
 	void close() override;
 
 	// Diagnostics -- could be exposed to GDScript via ArCapture later.
@@ -63,6 +67,10 @@ private:
 	uint16_t port_ = 0;
 	uint32_t video_config_seq_ = 1;
 	uint32_t video_chunk_seq_ = 1;
+	uint32_t imu_batch_seq_ = 1;
+	uint32_t pose_sample_seq_ = 1;
+	uint32_t point_cloud_seq_ = 1;
+	uint32_t camera_intrinsics_seq_ = 1;
 	// VIDEO_CONFIG (SPS/PPS) does not enter the FIFO queue -- as
 	// docs/PROTOCOL.md requires, it's resent at the very start of EVERY
 	// (re)connection, since a new server/session may never have seen the SPS/PPS.

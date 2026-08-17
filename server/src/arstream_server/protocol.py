@@ -50,11 +50,11 @@ class Header:
 
 @dataclass
 class ImuSample:
-    sensor_type: int  # 0=accelerometer, 1=gyroscope
+    sensor_type: int  # Android ASENSOR_TYPE_* constant (not limited to accel/gyro -- see docs/PROTOCOL.md §3.4)
     timestamp_ns: int
     x: float
     y: float
-    z: float
+    z: float  # scalar sensors (temperature, pressure, light, ...) use x only, y=z=0
 
 
 @dataclass
