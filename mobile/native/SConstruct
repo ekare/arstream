@@ -4,6 +4,18 @@
 
 env = SConscript("../thirdparty/godot-cpp/SConstruct", {"api_version": "4.6"})
 
+if env["platform"] == "android":
+    # godot-cpp's tools/android.py builds the static lib with every one of
+    # its hundreds of generated class .o files listed directly on the ar
+    # command line. tools/web.py already works around the equivalent issue
+    # for emar via TempFileMunge -- android.py doesn't, and Linux's ARG_MAX
+    # is low enough to overflow on this ("Argument list too long", confirmed
+    # on GitHub Actions ubuntu-latest; not hit on Windows, which is why this
+    # wasn't caught locally). llvm-ar (NDK toolchain) supports the same
+    # @responsefile syntax emar does, so the identical fix applies.
+    env["ARCOM_POSIX"] = env["ARCOM"].replace("$TARGET", "$TARGET.posix").replace("$SOURCES", "$SOURCES.posix")
+    env["ARCOM"] = "${TEMPFILE(ARCOM_POSIX)}"
+
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
 sources += Glob("src/sink/*.cpp")
