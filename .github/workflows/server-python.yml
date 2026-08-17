@@ -2,7 +2,7 @@ name: server-python
 
 on:
   push:
-    branches: [master]
+    branches: [master, ci/m7-github-actions]
     paths:
       - "server/**"
       - "fixtures/**"
