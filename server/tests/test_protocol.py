@@ -27,8 +27,8 @@ def test_clock_sync_response_matches_fixture():
 
 def test_imu_batch_matches_fixture():
     samples = [
-        protocol.ImuSample(sensor_type=0, timestamp_ns=100, x=1.5, y=-2.5, z=9.8),
-        protocol.ImuSample(sensor_type=1, timestamp_ns=200, x=0.1, y=0.2, z=0.3),
+        protocol.ImuSample(sensor_type=0, timestamp_ns=100, x=1.5, y=-2.5, z=9.8, w=0.0),
+        protocol.ImuSample(sensor_type=15, timestamp_ns=200, x=0.1, y=0.2, z=0.3, w=0.9),
     ]
     encoded = protocol.encode_imu_batch(seq=3, samples=samples)
     assert encoded == _read_fixture("imu_batch.bin")
@@ -67,7 +67,7 @@ def test_clock_sync_response_round_trip():
 
 
 def test_imu_batch_round_trip():
-    samples = [protocol.ImuSample(0, 1, 1.0, 2.0, 3.0), protocol.ImuSample(1, 2, 4.0, 5.0, 6.0)]
+    samples = [protocol.ImuSample(0, 1, 1.0, 2.0, 3.0, 0.0), protocol.ImuSample(15, 2, 4.0, 5.0, 6.0, 0.75)]
     encoded = protocol.encode_imu_batch(seq=1, samples=samples)
     msg, _ = protocol.next_message(encoded)
     decoded = protocol.decode_imu_batch(msg.payload)

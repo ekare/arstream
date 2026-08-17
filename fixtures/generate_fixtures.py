@@ -31,10 +31,12 @@ def main() -> None:
     payload = struct.pack(">qqq", 1000, 1050, 1060)
     write("clock_sync_response.bin", header(len(payload), 0x04, 2) + payload)
 
-    # imu_batch: seq=3, two samples: (accel, t=100, 1.5,-2.5,9.8), (gyro, t=200, 0.1,0.2,0.3)
+    # imu_batch: seq=3, two samples: (accel, t=100, 1.5,-2.5,9.8,w=0),
+    # (game_rotation_vector sensor_type=15, t=200, 0.1,0.2,0.3,w=0.9) -- the
+    # second sample exercises the quaternion-scalar `w` field non-trivially.
     payload = struct.pack(">H", 2)
-    payload += struct.pack(">Bqfff", 0, 100, 1.5, -2.5, 9.8)
-    payload += struct.pack(">Bqfff", 1, 200, 0.1, 0.2, 0.3)
+    payload += struct.pack(">Bqffff", 0, 100, 1.5, -2.5, 9.8, 0.0)
+    payload += struct.pack(">Bqffff", 15, 200, 0.1, 0.2, 0.3, 0.9)
     write("imu_batch.bin", header(len(payload), 0x20, 3) + payload)
 
     # pose_sample: seq=4, t=5000, tracking_state=2, pos(1,2,3), quat(0,0,0,1)

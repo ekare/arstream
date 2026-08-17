@@ -84,6 +84,7 @@ class RecorderPlugin(StreamPlugin):
                 "x": s.x,
                 "y": s.y,
                 "z": s.z,
+                "w": s.w,
             }) + "\n")
         f.flush()
 

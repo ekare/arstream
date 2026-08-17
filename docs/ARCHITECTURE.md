@@ -94,7 +94,7 @@ Two device-confirmed pitfalls worth knowing if this code is touched again:
   | File | Contents |
   |---|---|
   | `<output_path>` | raw Annex-B H.264 (SPS/PPS + frames, concatenated in order) |
-  | `<output_path>.imu.jsonl` | one line per sensor sample: `{sensor_type, timestamp_ns, x, y, z}` |
+  | `<output_path>.imu.jsonl` | one line per sensor sample: `{sensor_type, timestamp_ns, x, y, z, w}` (`w` is the quaternion scalar for rotation-vector-family sensors, `0` otherwise — see `PROTOCOL.md` §3.4) |
   | `<output_path>.poses.jsonl` | one line per `POSE_SAMPLE` (ARCore only): `{timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw}` |
   | `<output_path>.points.jsonl` | one line per `POINT_CLOUD` (ARCore only): `{timestamp_ns, points: [[x,y,z,confidence], ...]}` |
   | `<output_path>.intrinsics.json` | latest `CAMERA_INTRINSICS` snapshot (ARCore only): `{fx, fy, cx, cy, width, height}`, overwritten on change |

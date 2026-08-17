@@ -53,6 +53,13 @@ struct ImuSample {
 	uint8_t sensor_type = 0; // 0=accelerometer, 1=gyroscope
 	int64_t timestamp_ns = 0;
 	float x = 0, y = 0, z = 0;
+	// Quaternion scalar component (cos(theta/2)) for rotation-vector-family
+	// sensors (ASENSOR_TYPE_ROTATION_VECTOR=11, GAME_ROTATION_VECTOR=15,
+	// GEOMAGNETIC_ROTATION_VECTOR=20), whose Android SensorEvent carries 4
+	// floats, not 3 -- without this, x/y/z alone can't be reconstructed into
+	// the full unit quaternion (sign of w is not recoverable from magnitude
+	// alone). Unused (0) for every other sensor type.
+	float w = 0;
 };
 
 struct Point {

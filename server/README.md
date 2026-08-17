@@ -108,7 +108,7 @@ An exception raised by one plugin never stops the other plugins or the ingest it
 |---|---|---|
 | `video.h264` | raw Annex-B | SPS/PPS + frames, concatenated in wire order |
 | `frames.jsonl` | JSON lines | one line per `VIDEO_CHUNK`: `{timestamp_ns, is_keyframe, byte_offset, size}` — `byte_offset`/`size` index into `video.h264`, so a specific frame's bytes can be sliced out without decoding the whole stream |
-| `imu.jsonl` | JSON lines | one line per sensor sample (batches are flattened): `{sensor_type, timestamp_ns, x, y, z}` — see `docs/PROTOCOL.md` §3.4 for what `sensor_type` can be (not just accelerometer/gyroscope) |
+| `imu.jsonl` | JSON lines | one line per sensor sample (batches are flattened): `{sensor_type, timestamp_ns, x, y, z, w}` — see `docs/PROTOCOL.md` §3.4 for what `sensor_type` can be (not just accelerometer/gyroscope) and what `w` (quaternion scalar, rotation-vector-family sensors only) means |
 | `poses.jsonl` | JSON lines | one line per `POSE_SAMPLE` (ARCore only): `{timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw}` |
 | `points.jsonl` | JSON lines | one line per `POINT_CLOUD` message (ARCore only): `{timestamp_ns, points: [[x,y,z,confidence], ...]}` |
 | `intrinsics.json` | JSON snapshot | latest `CAMERA_INTRINSICS` (ARCore only): `{fx, fy, cx, cy, width, height}` — overwritten on change, not append-only |
@@ -182,7 +182,7 @@ Every `.py` file under `--plugins-dir` (except ones starting with an underscore)
 | `on_session_start(session)` | When a new TCP connection opens | `session: Session` |
 | `on_video_config(session, config, sps_pps)` | When a `VIDEO_CONFIG` message arrives (once per connection + every reconnect) | `config: dict` (codec/size/fps/rotation), `sps_pps: bytes` (Annex-B) |
 | `on_video_chunk(session, timestamp_ns, is_keyframe, nal)` | On every `VIDEO_CHUNK` | `timestamp_ns: int`, `is_keyframe: bool`, `nal: bytes` (Annex-B) |
-| `on_imu_batch(session, samples)` | On every `IMU_BATCH` | `samples: list[protocol.ImuSample]` (`sensor_type, timestamp_ns, x, y, z`) |
+| `on_imu_batch(session, samples)` | On every `IMU_BATCH` | `samples: list[protocol.ImuSample]` (`sensor_type, timestamp_ns, x, y, z, w`) |
 | `on_pose_sample(session, timestamp_ns, tracking_state, x, y, z, qx, qy, qz, qw)` | On every `POSE_SAMPLE` (ARCore only) | all `float` except `timestamp_ns: int`, `tracking_state: int` |
 | `on_point_cloud(session, timestamp_ns, points)` | On every `POINT_CLOUD` (ARCore only) | `timestamp_ns: int`, `points: list[protocol.Point]` (`x, y, z, confidence`) |
 | `on_camera_intrinsics(session, fx, fy, cx, cy, width, height)` | On every `CAMERA_INTRINSICS` (ARCore only) | `fx, fy, cx, cy: float`, `width, height: int` |

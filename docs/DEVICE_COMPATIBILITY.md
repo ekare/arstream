@@ -58,6 +58,52 @@ Actually accessing this encoder via `AMediaCodec` (NDK) will be verified in M3, 
 
 ---
 
+## Samsung Galaxy A24 (SM-A245F)
+
+**Date:** 2026-08-17 · **Method:** ADB-automated on-device test, **unforced `auto` backend selection** (first test in the project where `debug.arstream.capture_backend` was left unset — every prior A30s test forced a specific backend)
+
+| Field | Value |
+|---|---|
+| Model | SM-A245F |
+| Android version | 16 (API 36) |
+| CPU ABI | arm64-v8a |
+| Chipset | MediaTek mt6789 |
+
+### JNI bootstrap / Gradle plugin — **confirmed working cross-vendor**
+
+The entire M6 JNI bootstrap chain (Gradle Android plugin, `System.loadLibrary` discovery, UI-thread-marshaled `ArCoreApk_checkAvailabilityAsync`, `com.google.ar:core` Gradle dependency resolution) worked first-try on a second device from a completely different chipset vendor (MediaTek vs. the A30s's Exynos) and a much newer Android version (16/API 36 vs. 11/API 30) with zero code changes. `ARCore: SUPPORTED_INSTALLED` displayed correctly.
+
+### ARCore status — **reports `SUPPORTED_INSTALLED`, but `ArSession_resume()` fails at runtime**
+
+This is the first device where the two disagree. `ArCoreApk_checkAvailabilityAsync()` returns `SUPPORTED_INSTALLED` (the package is present and current), but actually starting a session fails inside `ArCoreCaptureSession::render_loop()`:
+
+```
+ArCoreError: third_party/arcore/ar/infrastructure/android/android_sensors.cc:630/139
+ArCoreError: third_party/arcore/ar/infrastructure/android_data_source.cc:1073/553
+ArCoreError: third_party/arcore/ar/core/session.cc:1476
+ArCore session start failed: ArSession_resume failed (camera permission missing, or camera in use?)
+```
+
+Camera permission was confirmed granted (`dumpsys package` → `android.permission.CAMERA: granted=true`) and no other app held the camera, so despite our own log message's guess, the real failure is internal to ARCore's own sensor-event-source setup (`android_sensors.cc`) — plausibly a MediaTek/Samsung sensor HAL quirk ARCore's VIO stack doesn't handle on this unit. Root cause not pursued further since **the fallback path is exactly what should happen here and it did**.
+
+### `CaptureController` auto-fallback — **verified working exactly as designed**
+
+This is the first real-world (not manually-forced) exercise of `decide_backend()`'s "auto" logic. Sequence observed in logcat, sub-second: `ArSession_resume` fails at `09:58:57.273` → `ArCoreCaptureSession::start()` returns failure → `CaptureController::start()` (not forced to ArCore, so no loud failure) falls through to `Camera2CaptureSession` → `CameraManagerGlobal` shows `CAMERA_STATE_OPENING` at `09:58:57.303` → `CAMERA_STATE_ACTIVE` at `09:58:57.737`. The app recorded normally afterward (600+ frames observed in the UI at 29.5fps, matching the A30s's Camera2 numbers) with no crash, no hang, no user-visible glitch — the failure was invisible except in logcat.
+
+On-device sibling files after a ~6 minute recording confirm the backend split is exactly as designed: `capture.h264.intrinsics.json` **doesn't exist at all** (Camera2 path never calls `on_camera_intrinsics`), `capture.h264.poses.jsonl`/`capture.h264.points.jsonl` exist but are **0 bytes** (opened unconditionally by `FileSink::open()`, never written to since no ArCore pose/point-cloud callbacks fired), while `capture.h264.imu.jsonl` is fully populated (436 839 lines) — confirming `SensorSampler` really is backend-independent as designed (§A2 of the build plan). Sample sensor types observed: `1` (accelerometer, magnitude ≈9.9 m/s², sane), `5` (light), `27` (vendor-specific, outside the standard `ASENSOR_TYPE_*` range — captured generically as intended, no allowlist needed).
+
+**Net finding:** this device is a good regression test for the fallback path specifically — a device where ARCore *looks* available but isn't actually usable, which the A30s never exercised (there ARCore genuinely works). No code changes needed; this validates the "auto" contract (silent fallback when not forced, per `CaptureController`'s design) rather than exposing a bug.
+
+### Hardware H.264 (AVC) encoder — **verified**
+
+`AMediaCodec`-backed recording completed normally via the Camera2 fallback path — 29.5fps real-time, no encoder errors in logcat.
+
+### Sensors — **verified, backend-independent as designed**
+
+See the `CaptureController` section above — `imu.jsonl` populated correctly during a Camera2-backend recording, confirming `SensorSampler` runs unconditionally regardless of which capture backend is active.
+
+---
+
 ## Template — when adding a new device
 
 ```markdown

@@ -55,6 +55,7 @@ class ImuSample:
     x: float
     y: float
     z: float  # scalar sensors (temperature, pressure, light, ...) use x only, y=z=0
+    w: float = 0.0  # quaternion scalar (cos(theta/2)) for rotation-vector-family sensors (11/15/20), 0 otherwise
 
 
 @dataclass
@@ -207,7 +208,7 @@ def decode_video_chunk(payload: bytes) -> tuple[int, bool, bytes]:
 def encode_imu_batch(seq: int, samples: list[ImuSample]) -> bytes:
     payload = bytearray(struct.pack(">H", len(samples)))
     for s in samples:
-        payload += struct.pack(">Bqfff", s.sensor_type, s.timestamp_ns, s.x, s.y, s.z)
+        payload += struct.pack(">Bqffff", s.sensor_type, s.timestamp_ns, s.x, s.y, s.z, s.w)
     return _wrap(MsgType.IMU_BATCH, seq, bytes(payload))
 
 
@@ -216,9 +217,9 @@ def decode_imu_batch(payload: bytes) -> list[ImuSample]:
     offset = 2
     samples = []
     for _ in range(count):
-        sensor_type, timestamp_ns, x, y, z = struct.unpack_from(">Bqfff", payload, offset)
-        samples.append(ImuSample(sensor_type, timestamp_ns, x, y, z))
-        offset += 21
+        sensor_type, timestamp_ns, x, y, z, w = struct.unpack_from(">Bqffff", payload, offset)
+        samples.append(ImuSample(sensor_type, timestamp_ns, x, y, z, w))
+        offset += 25
     return samples
 
 

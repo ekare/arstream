@@ -1,8 +1,8 @@
-# arstream Wire Protocol — v1.0
+# arstream Wire Protocol — v1.1
 
 This document defines the **canonical** wire format between the mobile client (phone) and the destination server (and any adapter behind it). Two independent implementations of the protocol live in this repo — `mobile/native/src/net/protocol_writer.cpp` (C++, the writer side) and `server/src/arstream_server/protocol.py` (Python, the reader side) — both must be a faithful mirror of this document. If you're writing a third implementation (an external adapter), this is the single source of truth.
 
-**Status:** v1.0 — first pre-production release with fixed, documented limits.
+**Status:** v1.1 — pre-production, `IMU_BATCH` record layout changed since v1.0 (see §8 Changelog).
 
 ---
 
@@ -128,6 +128,7 @@ Payload: `uint16 sample_count` + `sample_count` repetitions of:
 | `sensor_type` | `uint8` — an Android `ASENSOR_TYPE_*` constant, NOT limited to accelerometer/gyroscope. The client sends whatever sensors the device actually has. |
 | `timestamp_ns` | `int64` |
 | `x, y, z` | `float32` × 3 — for scalar sensors (temperature, pressure, light, humidity, proximity) only `x` is meaningful, `y`/`z` are `0`. |
+| `w` | `float32` — quaternion scalar component (`cos(θ/2)`), meaningful **only** for the rotation-vector family (`sensor_type` 11/15/20 below); `0` for every other sensor type. |
 
 Common `sensor_type` values (Android NDK `<android/sensor.h>`):
 
@@ -141,9 +142,13 @@ Common `sensor_type` values (Android NDK `<android/sensor.h>`):
 | 8 | Proximity | x only (cm) |
 | 9 | Gravity | x,y,z (m/s²) |
 | 10 | Linear acceleration | x,y,z (m/s²) |
-| 11 | Rotation vector | x,y,z |
+| 11 | Rotation vector | x,y,z,**w** — device-fused orientation quaternion, accel+gyro+magnetometer, absolute (magnetic-north-referenced) heading |
 | 12 | Relative humidity | x only (%) |
 | 13 | Ambient temperature | x only (°C) |
+| 15 | Game rotation vector | x,y,z,**w** — same fused-orientation quaternion as 11, but accel+gyro **only** (no magnetometer): relative/drift-free-of-magnetic-noise orientation, no absolute heading reference |
+| 20 | Geomagnetic rotation vector | x,y,z,**w** — accel+magnetometer only (no gyro), absolute heading, lower power |
+
+`x,y,z,w` together form a unit quaternion for sensor types 11/15/20 (`x²+y²+z²+w² = 1`); `w` is not derivable from `x,y,z` alone (sign ambiguity), which is why it's carried explicitly rather than reconstructed on the reader side.
 
 This list isn't exhaustive — any `ASENSOR_TYPE_*` the device reports may appear. A receiver that doesn't recognize a `sensor_type` value should just store/ignore it rather than reject the batch.
 
@@ -199,4 +204,5 @@ Both `protocol_writer_test.cpp` and `server/tests/test_protocol.py` are tested a
 
 ## 8. Changelog
 
+- **v1.1** — `IMU_BATCH`'s per-sample record grew a 4th `float32` field, `w` (quaternion scalar `cos(θ/2)`, for rotation-vector-family `sensor_type`s 11/15/20 — see §3.4). **Breaking change to the record layout**: per-sample size went from 21 to 25 bytes; a reader built against v1.0's 21-byte record will misparse `IMU_BATCH` payloads encoded after this change (this does not affect the header-level "skip unknown `msg_type`" resilience in §2, which is unaffected — only `IMU_BATCH`'s own internal layout changed). `protocol_version` was **not** bumped for this (still `0x0001`): this project has no external adapter yet, and both reference implementations (`protocol.cpp`, `protocol.py`) were updated together in the same change. Any third-party implementation started against v1.0 must add the `w` field.
 - **v1.0** — initial release. Message types 0x01–0x05, 0x10, 0x20, 0x30–0x32, 0x40, 0xF0.

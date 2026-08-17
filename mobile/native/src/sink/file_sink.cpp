@@ -56,7 +56,8 @@ void FileSink::write_imu_batch(const std::vector<protocol::ImuSample> &samples) 
 				",\"timestamp_ns\":" + std::to_string(s.timestamp_ns) +
 				",\"x\":" + std::to_string(s.x) +
 				",\"y\":" + std::to_string(s.y) +
-				",\"z\":" + std::to_string(s.z) + "}\n";
+				",\"z\":" + std::to_string(s.z) +
+				",\"w\":" + std::to_string(s.w) + "}\n";
 		fwrite(line.data(), 1, line.size(), imu_file_);
 	}
 	fflush(imu_file_);

@@ -133,8 +133,8 @@ async def test_imu_batch_writes_one_line_per_sample(tmp_path: Path):
     plugin = RecorderPlugin(tmp_path)
     session = Session.new(peer_address="1.2.3.4:9")
     samples = [
-        protocol.ImuSample(sensor_type=1, timestamp_ns=10, x=0.1, y=0.2, z=9.8),
-        protocol.ImuSample(sensor_type=13, timestamp_ns=11, x=25.5, y=0.0, z=0.0),  # ambient temperature, scalar
+        protocol.ImuSample(sensor_type=1, timestamp_ns=10, x=0.1, y=0.2, z=9.8, w=0.0),
+        protocol.ImuSample(sensor_type=15, timestamp_ns=11, x=0.0, y=0.0, z=0.7, w=0.7),  # game rotation vector, quaternion
     ]
 
     await plugin.on_session_start(session)
@@ -143,8 +143,8 @@ async def test_imu_batch_writes_one_line_per_sample(tmp_path: Path):
 
     rows = _read_jsonl(tmp_path / session.id / "imu.jsonl")
     assert rows == [
-        {"sensor_type": 1, "timestamp_ns": 10, "x": 0.1, "y": 0.2, "z": 9.8},
-        {"sensor_type": 13, "timestamp_ns": 11, "x": 25.5, "y": 0.0, "z": 0.0},
+        {"sensor_type": 1, "timestamp_ns": 10, "x": 0.1, "y": 0.2, "z": 9.8, "w": 0.0},
+        {"sensor_type": 15, "timestamp_ns": 11, "x": 0.0, "y": 0.0, "z": 0.7, "w": 0.7},
     ]
 
 

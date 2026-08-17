@@ -33,6 +33,22 @@ bool is_scalar_sensor_type(int32_t type) {
 	}
 }
 
+// Rotation-vector-family sensors report a full unit quaternion
+// (x,y,z,w=cos(theta/2)) in event.data[0..3], unlike every other 3-axis
+// vector sensor here which only ever fills data[0..2]. Without reading
+// data[3] the quaternion can't be reconstructed (w's sign isn't recoverable
+// from x/y/z's magnitude alone) -- see protocol.h's ImuSample::w comment.
+bool is_quaternion_sensor_type(int32_t type) {
+	switch (type) {
+		case ASENSOR_TYPE_ROTATION_VECTOR:
+		case ASENSOR_TYPE_GAME_ROTATION_VECTOR:
+		case ASENSOR_TYPE_GEOMAGNETIC_ROTATION_VECTOR:
+			return true;
+		default:
+			return false;
+	}
+}
+
 } // namespace
 
 SensorSampler::~SensorSampler() {
@@ -107,6 +123,7 @@ void SensorSampler::run(BatchCallback on_batch) {
 					sample.x = e.data[0];
 					sample.y = scalar ? 0.0f : e.data[1];
 					sample.z = scalar ? 0.0f : e.data[2];
+					sample.w = is_quaternion_sensor_type(e.type) ? e.data[3] : 0.0f;
 					batch.push_back(sample);
 				}
 			}

@@ -59,8 +59,8 @@ void test_clock_sync_response_matches_fixture() {
 
 void test_imu_batch_matches_fixture() {
 	std::vector<ImuSample> samples = {
-		{ 0, 100, 1.5f, -2.5f, 9.8f },
-		{ 1, 200, 0.1f, 0.2f, 0.3f },
+		{ 0, 100, 1.5f, -2.5f, 9.8f, 0.0f },
+		{ 15, 200, 0.1f, 0.2f, 0.3f, 0.9f },
 	};
 	auto encoded = encode_imu_batch(3, samples);
 	check_bytes_equal(encoded, read_fixture("imu_batch.bin"), "imu_batch matches fixture");
@@ -108,7 +108,7 @@ void test_clock_sync_response_round_trip() {
 }
 
 void test_imu_batch_round_trip() {
-	std::vector<ImuSample> samples = { { 0, 1, 1.0f, 2.0f, 3.0f }, { 1, 2, 4.0f, 5.0f, 6.0f } };
+	std::vector<ImuSample> samples = { { 0, 1, 1.0f, 2.0f, 3.0f, 0.0f }, { 15, 2, 4.0f, 5.0f, 6.0f, 0.75f } };
 	auto encoded = encode_imu_batch(1, samples);
 	MessageView msg;
 	size_t consumed = 0;
@@ -116,8 +116,8 @@ void test_imu_batch_round_trip() {
 	std::vector<ImuSample> decoded;
 	check(decode_imu_batch(msg.payload, msg.payload_size, decoded), "imu_batch decode succeeds");
 	check(decoded.size() == 2, "imu_batch has 2 samples");
-	check(decoded[0].sensor_type == 0 && decoded[0].timestamp_ns == 1 && decoded[0].x == 1.0f, "imu_batch first sample is correct");
-	check(decoded[1].sensor_type == 1 && decoded[1].z == 6.0f, "imu_batch second sample is correct");
+	check(decoded[0].sensor_type == 0 && decoded[0].timestamp_ns == 1 && decoded[0].x == 1.0f && decoded[0].w == 0.0f, "imu_batch first sample is correct");
+	check(decoded[1].sensor_type == 15 && decoded[1].z == 6.0f && decoded[1].w == 0.75f, "imu_batch second sample is correct");
 }
 
 void test_point_cloud_round_trip() {

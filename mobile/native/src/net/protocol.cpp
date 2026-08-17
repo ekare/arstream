@@ -201,6 +201,7 @@ std::vector<uint8_t> encode_imu_batch(uint32_t seq, const std::vector<ImuSample>
 		put_f32be(payload, s.x);
 		put_f32be(payload, s.y);
 		put_f32be(payload, s.z);
+		put_f32be(payload, s.w);
 	}
 	return wrap(MsgType::ImuBatch, seq, payload);
 }
@@ -274,7 +275,7 @@ bool decode_imu_batch(const uint8_t *payload, size_t size, std::vector<ImuSample
 	out_samples.clear();
 	out_samples.reserve(count);
 	for (uint16_t i = 0; i < count; i++) {
-		if (offset + 21 > size) {
+		if (offset + 25 > size) {
 			return false;
 		}
 		ImuSample s;
@@ -291,8 +292,11 @@ bool decode_imu_batch(const uint8_t *payload, size_t size, std::vector<ImuSample
 		if (!get_f32be(payload, size, offset + 17, s.z)) {
 			return false;
 		}
+		if (!get_f32be(payload, size, offset + 21, s.w)) {
+			return false;
+		}
 		out_samples.push_back(s);
-		offset += 21;
+		offset += 25;
 	}
 	return true;
 }
