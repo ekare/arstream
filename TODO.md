@@ -5,8 +5,8 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Before/at the actual GitHub push
 
-- [ ] Create the GitHub repo and add it as a remote (`git remote add origin ...`), then push. Not done yet -- needs the target repo URL/visibility (public/private) decided.
-- [ ] Double-check no local-only paths, IPs, or credentials are hardcoded anywhere (`192.168.1.100:9999` in `mobile/scenes/Main.tscn` is a placeholder default, not a secret -- fine to ship).
+- [x] Create the GitHub repo and add it as a remote, then push -- done, `github.com/ekare/arstream`.
+- [x] Double-check no local-only paths, IPs, or credentials are hardcoded anywhere (`192.168.1.100:9999` in `mobile/scenes/Main.tscn` is a placeholder default, not a secret -- fine to ship).
 - [ ] Add a repo description/topics on GitHub once created (Godot, GDExtension, ARCore, Android, H.264, streaming).
 
 ## M6 follow-ups -- ARCore capture path (core path done, see `docs/ROADMAP.md`)
@@ -17,9 +17,9 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## M7 -- GitHub-quality polish + CI
 
-- [ ] `.github/workflows/server-python.yml` -- Python 3.11/3.12 matrix, `pytest`, maybe `ruff`/`mypy`.
-- [ ] `.github/workflows/native-build.yml` -- `scons platform=android arch=arm64 target=template_debug` build check + host-native `protocol_test` build+run (no device/emulator needed).
-- [ ] Tag `v0.1.0` once CI is green on a clean clone.
+- [x] `.github/workflows/server-python.yml` -- Python 3.11/3.12 matrix, `pytest`. (No `ruff`/`mypy`: neither is configured anywhere in the repo yet, so adding a CI gate for them now would just fail on unlinted pre-existing code -- separate follow-up if wanted.)
+- [x] `.github/workflows/native-build.yml` -- `scons platform=android arch=arm64 target=template_debug` build check + host-native `protocol_test` build+run. Found and fixed a real Linux-only bug in the process: godot-cpp's `tools/android.py` doesn't wrap the `ar` invocation in a response file the way `tools/web.py` already does for `emar`, so linking `libgodot-cpp....a` overflowed Linux's `ARG_MAX` ("Argument list too long") -- never hit on Windows, which is why local builds never caught it. Fixed from our own top-level `mobile/native/SConstruct` (not the submodule) via the same `TempFileMunge` pattern `web.py` uses. Also hardened `fetch_arcore_sdk.ps1` with retry/backoff after hitting a transient 429 from `raw.githubusercontent.com` on a CI runner.
+- [ ] Tag `v0.1.0` once CI is green on a clean clone -- CI is green (`ci/m7-github-actions` branch, run #4); not yet tagged, ask before doing so.
 
 ## Protocol / server gaps
 
