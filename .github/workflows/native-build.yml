@@ -2,7 +2,7 @@ name: native-build
 
 on:
   push:
-    branches: [master, ci/m7-github-actions]
+    branches: [master]
     paths:
       - "mobile/native/**"
       - "mobile/thirdparty/godot-cpp"
