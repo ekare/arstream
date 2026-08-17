@@ -1,0 +1,96 @@
+name: native-build
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "mobile/native/**"
+      - "mobile/thirdparty/godot-cpp"
+      - "mobile/thirdparty/fetch_arcore_sdk.ps1"
+      - ".github/workflows/native-build.yml"
+  pull_request:
+    paths:
+      - "mobile/native/**"
+      - "mobile/thirdparty/godot-cpp"
+      - "mobile/thirdparty/fetch_arcore_sdk.ps1"
+      - ".github/workflows/native-build.yml"
+
+jobs:
+  host-protocol-test:
+    # Pure C++ wire-framing tests -- no godot-cpp, no Android SDK/NDK, no
+    # device/emulator (see mobile/native/tests/SConstruct's own comment).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install scons
+
+      - name: Build protocol_test
+        working-directory: mobile/native/tests
+        run: scons
+
+      - name: Run protocol_test
+        working-directory: mobile/native/tests
+        run: ./protocol_test
+
+  android-build-check:
+    # Compiles the real GDExtension for Android arm64 -- catches build
+    # breakage without a device/emulator. APK export + on-device capture are
+    # verified manually (see docs/ROADMAP.md's M6 device-verification notes).
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "29.0.14206865"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install scons
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Vendor ARCore C API (gitignored, see fetch_arcore_sdk.ps1)
+        shell: pwsh
+        run: mobile/thirdparty/fetch_arcore_sdk.ps1
+
+      - name: Get godot-cpp submodule commit
+        id: godot-cpp
+        run: echo "sha=$(git -C mobile/thirdparty/godot-cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache godot-cpp Android build
+        uses: actions/cache@v4
+        with:
+          path: mobile/thirdparty/godot-cpp/bin
+          key: godot-cpp-android-arm64-${{ steps.godot-cpp.outputs.sha }}-ndk${{ env.NDK_VERSION }}
+
+      - name: scons platform=android arch=arm64 target=template_debug
+        working-directory: mobile/native
+        run: |
+          set -o pipefail
+          scons platform=android arch=arm64 target=template_debug \
+            ndk_version=$NDK_VERSION android_api_level=26 2>&1 | tee /tmp/scons-android.log
+
+      - name: Dump build log tail on failure
+        if: failure()
+        run: |
+          if [ -f /tmp/scons-android.log ]; then
+            {
+              echo "## scons android build -- last 150 lines"
+              echo '```'
+              tail -n 150 /tmp/scons-android.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "(scons never ran -- an earlier step failed first, see its own log)" >> "$GITHUB_STEP_SUMMARY"
+          fi
