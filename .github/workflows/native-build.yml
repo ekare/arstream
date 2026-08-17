@@ -76,6 +76,17 @@ jobs:
 
       - name: scons platform=android arch=arm64 target=template_debug
         working-directory: mobile/native
-        run: >
-          scons platform=android arch=arm64 target=template_debug
-          ndk_version=$NDK_VERSION android_api_level=26
+        run: |
+          set -o pipefail
+          scons platform=android arch=arm64 target=template_debug \
+            ndk_version=$NDK_VERSION android_api_level=26 2>&1 | tee /tmp/scons-android.log
+
+      - name: Dump build log tail on failure
+        if: failure()
+        run: |
+          {
+            echo "## scons android build -- last 150 lines"
+            echo '```'
+            tail -n 150 /tmp/scons-android.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
