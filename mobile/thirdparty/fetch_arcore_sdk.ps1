@@ -35,14 +35,32 @@ New-Item -ItemType Directory -Force -Path $IncludeDir | Out-Null
 New-Item -ItemType Directory -Force -Path $JniDir | Out-Null
 New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null
 
+# raw.githubusercontent.com/dl.google.com occasionally 429 shared CI-runner
+# IP ranges (unrelated to this repo) -- retry with backoff instead of
+# failing the whole build on a transient rate-limit.
+function Invoke-WebRequestWithRetry {
+    param([string]$Uri, [string]$OutFile, [int]$MaxAttempts = 5)
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+            return
+        } catch {
+            if ($attempt -eq $MaxAttempts) { throw }
+            $delay = [math]::Pow(2, $attempt)
+            Write-Host "  Attempt $attempt/$MaxAttempts failed ($($_.Exception.Message)), retrying in ${delay}s..."
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 Write-Host "Fetching arcore_c_api.h header..."
 $HeaderUrl = "https://raw.githubusercontent.com/google-ar/arcore-android-sdk/master/libraries/include/arcore_c_api.h"
-Invoke-WebRequest -Uri $HeaderUrl -OutFile (Join-Path $IncludeDir "arcore_c_api.h")
+Invoke-WebRequestWithRetry -Uri $HeaderUrl -OutFile (Join-Path $IncludeDir "arcore_c_api.h")
 
 Write-Host "Fetching core-$Version.aar from Maven..."
 $AarUrl = "https://dl.google.com/dl/android/maven2/com/google/ar/core/$Version/core-$Version.aar"
 $AarPath = Join-Path $TmpDir "core-$Version.aar"
-Invoke-WebRequest -Uri $AarUrl -OutFile $AarPath
+Invoke-WebRequestWithRetry -Uri $AarUrl -OutFile $AarPath
 
 Write-Host "Extracting libarcore_sdk_c.so (arm64-v8a)..."
 $ZipPath = Join-Path $TmpDir "core-$Version.zip"

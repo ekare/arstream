@@ -84,9 +84,13 @@ jobs:
       - name: Dump build log tail on failure
         if: failure()
         run: |
-          {
-            echo "## scons android build -- last 150 lines"
-            echo '```'
-            tail -n 150 /tmp/scons-android.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/scons-android.log ]; then
+            {
+              echo "## scons android build -- last 150 lines"
+              echo '```'
+              tail -n 150 /tmp/scons-android.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "(scons never ran -- an earlier step failed first, see its own log)" >> "$GITHUB_STEP_SUMMARY"
+          fi
