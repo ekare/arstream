@@ -8,6 +8,7 @@ shipped, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - [x] Create the GitHub repo and add it as a remote, then push -- done, `github.com/ekare/arstream`.
 - [x] Double-check no local-only paths, IPs, or credentials are hardcoded anywhere (`192.168.1.100:9999` in `mobile/scenes/Main.tscn` is a placeholder default, not a secret -- fine to ship).
 - [ ] Add a repo description/topics on GitHub once created (Godot, GDExtension, ARCore, Android, H.264, streaming).
+- [ ] `mobile/export_presets.cfg` is gitignored (machine-specific: keystore path, etc.), so its `launcher_icons/*` fields (pointing at `mobile/assets/icon/*.png`, added so the app has a real icon instead of Godot's default) live only locally. A fresh clone creating a new Android export preset in the editor needs those 4 fields re-pointed by hand -- `res://icon.png` (project icon, committed, used elsewhere already) doesn't auto-propagate to the Android launcher icon fields.
 
 ## M6 follow-ups -- ARCore capture path (core path done, see `docs/ROADMAP.md`)
 
